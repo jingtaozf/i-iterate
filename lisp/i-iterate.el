@@ -142,8 +142,11 @@ HANDLER is the body of the generated function."
     `(puthash ',name (lambda (,@arguments &rest rest) ,@handler) i-for-handlers)))
 
 (i-add-for-handler (uprform from downfrom) (spec driver exp)
-  (destructuring-bind (var verb _ target limit how iterator &optional (op '<=))
+  (destructuring-bind (var verb begin target limit how iterator &optional (op '<=))
       exp
+    ;; TODO: need to check for constant expressions in iterator and limit
+    ;; to possibly avoid generating extra vairables.
+    (oset driver variables (list (list var begin)))
     (oset driver actions
           (list
            (list
@@ -152,8 +155,7 @@ HANDLER is the body of the generated function."
               'incf)
              ((eql verb 'downfrom)
               (setq op '>=)
-              'decf)
-             (t (signal 'i-unknown-verb verb)))
+              'decf))
             var
             (when how
               (let ((sym (i-gensym spec)))
@@ -174,6 +176,51 @@ HANDLER is the body of the generated function."
               (cons (list sym limit) (oref driver variables)))
         (oset driver exit-conditions
               (list (list op var sym)))))))
+
+(i-add-for-handler in (spec driver exp)
+  (destructuring-bind (var verb iterated-list how iterator)
+      exp
+    ;; TODO: need to check for constant expressions in iterator and limit
+    ;; to possibly avoid generating extra vairables.
+    (let ((i-list (i-gensym spec))
+          (i-iterator (when iterator (i-gensym spec))))
+      (oset driver variables
+            (if iterator
+                (append (list (list i-list iterated-list))
+                        (list (list i-iterator iterator))
+                        (oref driver variables))
+              (cons (list i-list iterated-list)
+                    (oref driver variables))))
+      (oset driver actions
+            (cond
+             ((and (consp var) (consp (cdr var))) ; a proper list
+              (let ((varnames var)
+                    (varnames-sym (i-gensym spec))
+                    (list-sym (i-gensym spec)) name)
+                (while varnames
+                  (setq name (car varnames))
+                  (oset driver variables
+                        (cons name (oref driver variables))))
+                `((let ((,varnames-sym ,var) (,list-sym ,i-list))
+                    (while ,varnames-sym
+                      (set (car ,varnames-sym) (car ,list-sym))
+                      (setq ,varnames-sym (cdr ,varnames-sym)
+                            ,list-sym (cdr ,list-sym)))
+                    (setq ,i-list  (,@(or i-iterator 'cdr) ,i-list))))))
+             ((consp var)               ; a (key . value) pair
+              (let ((key (car var))
+                    (value (cdr var)))
+                (oset driver variables
+                      (append (list key) (list value)
+                              (oref driver variables)))
+                `((setq ,key (caar ,i-list) ,value (cadr ,i-list))
+                  (setq ,i-list (,@(or i-iterator 'cdr) ,i-list)))))
+             (t                           ; just a single variable
+              `((setq ,var (car ,i-list)
+                      ,i-list ,@(list
+                                 (if i-iterator `(funcall ,i-iterator ,i-list)
+                                   `(cdr ,i-list))))))))
+      (oset driver exit-conditions (list i-list)))))
 
 (defmethod i-aggregate-property ((spec i-spec) property &optional extractor)
   (with-slots (drivers) spec
@@ -211,10 +258,7 @@ HANDLER is the body of the generated function."
         :actions (list (list 'incf sym))) drivers))))
 
 (defun i--parse-for (exp spec)
-  (let ((driver
-         (make-instance
-          'i-driver
-          :variables (list (list (car exp) (caddr exp))))))
+  (let ((driver (make-instance 'i-driver)))
     (funcall (gethash (cadr exp) i-for-handlers) spec driver exp)
     (oset spec drivers (cons driver (oref spec drivers)))))
 
