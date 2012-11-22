@@ -206,7 +206,9 @@ HANDLER is the body of the generated function."
                       (set (car ,varnames-sym) (car ,list-sym))
                       (setq ,varnames-sym (cdr ,varnames-sym)
                             ,list-sym (cdr ,list-sym)))
-                    (setq ,i-list  (,@(or i-iterator 'cdr) ,i-list))))))
+                    (setq ,i-list ,@(list
+                                     (if i-iterator `(funcall ,i-iterator ,i-list)
+                                       `(cdr ,i-list))))))))
              ((consp var)               ; a (key . value) pair
               (let ((key (car var))
                     (value (cdr var)))
@@ -214,8 +216,12 @@ HANDLER is the body of the generated function."
                       (append (list key) (list value)
                               (oref driver variables)))
                 `((setq ,key (caar ,i-list) ,value (cadr ,i-list))
-                  (setq ,i-list (,@(or i-iterator 'cdr) ,i-list)))))
+                  (setq ,i-list ,@(list
+                                   (if i-iterator `(funcall ,i-iterator ,i-list)
+                                     `(cdr ,i-list)))))))
              (t                           ; just a single variable
+              (oset driver variables
+                    (cons var (oref driver variables)))
               `((setq ,var (car ,i-list)
                       ,i-list ,@(list
                                  (if i-iterator `(funcall ,i-iterator ,i-list)
