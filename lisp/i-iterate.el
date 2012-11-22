@@ -114,7 +114,12 @@ next value, each function must accept single argument returning single value")
     :type symbol
     :documentation "In case there is only one driver which iterates over
 a hash-table, we can generate a (maphash ...) instead of (while ...). If this 
-slot is non-nil, then `i-iterate' will generate the `maphash'."))
+slot is non-nil, then `i-iterate' will generate the `maphash'.")
+   (has-body-insertion-p
+    :initform nil
+    :type symbol
+    :documentation "Non-nil if the body must be inserted in a special place, rather
+than appended after all forms and before the result form."))
   :documentation "This class contains a specification of the
 expansion of the `i-iterate' macro")
 
@@ -177,10 +182,62 @@ HANDLER is the body of the generated function."
         (oset driver exit-conditions
               (list (list op var sym)))))))
 
+(i-add-for-handler across (spec driver exp)
+  (destructuring-bind (var verb iterated-array &optional how iterator)
+      exp
+    (let* ((i-array (i-gensym spec))
+           (i-pos (i-gensym spec))
+           iter-sym
+           (i-iterator
+            (if iterator
+                (progn
+                  (setq iter-sym (i-gensym spec))
+                  (oset driver variables `((,iter-sym ,iterator)))
+                  `(setq ,i-pos (funcall ,iter-sym ,i-pos)))
+              `(incf ,i-pos))))
+      (oset driver variables
+            (append (if (symbolp var) (list var) var)
+                    `((,i-pos 0) (,i-array ,iterated-array))
+                    (oref driver variables)))
+      (if (symbolp var)
+          (oset driver actions
+                `((setq ,var (aref ,i-array ,i-pos)) ,i-iterator))
+        (let ((dimensions (reverse (cons i-array var)))
+              (positions
+               (nreverse
+                (cons i-pos
+                      (mapcar (lambda (x) (i-gensym spec)) var))))
+              let-group pos-pre pos-post result)
+          (oset spec has-body-insertion-p t)
+          (while (cdr dimensions)
+            (setq pos-pre (cadr positions)
+                  pos-post (car positions)
+                  let-group
+                  (if let-group
+                      `((setq ,@(list (car dimensions))
+                              (aref ,@(list (cadr dimensions)) ,pos-pre))
+                        ,@(if iter-sym
+                              `((setq ,pos-pre (funcall ,iter-sym ,pos-pre)))
+                            `((incf ,pos-pre)))
+                        (let ((,pos-post 0))
+                          (while (< ,pos-post (length ,@(list (car dimensions))))
+                            ,@(when let-group let-group))))
+                    `((setq ,@(list (car dimensions))
+                            (aref ,@(list (cadr dimensions)) ,pos-pre))
+                      ,@(if iter-sym
+                            `((setq ,pos-pre (funcall ,iter-sym ,pos-pre)))
+                          `((incf ,pos-pre)))
+                      --i-body--)))
+            (setq dimensions (cdr dimensions)
+                  positions (cdr positions)))
+          (oset driver actions let-group)))
+      (oset driver exit-conditions
+            `((< ,i-pos (length ,i-array)))))))
+
 (i-add-for-handler in (spec driver exp)
   (destructuring-bind (var verb iterated-list how iterator)
       exp
-    ;; TODO: need to check for constant expressions in iterator and limit
+    ;; TODO: need to check for constant expressions in iterator and iterated-list
     ;; to possibly avoid generating extra vairables.
     (let ((i-list (i-gensym spec))
           (i-iterator (when iterator (i-gensym spec))))
@@ -290,9 +347,18 @@ HANDLER is the body of the generated function."
       (i--parse-exp (car s) i)
       (setq s (cdr s))) i))
 
+(defun i--normalize-body (body)
+  (cond
+   ((null body) nil)
+   ((and (consp body) (cdr body))
+    (append '(progn) body))
+   ((consp body) (car body))
+   (t body)))
+
 (defmacro i-iterate (&rest specs)
   (let ((spec (i--parse-specs specs)))
-    (with-slots (body result drivers has-exclusive-hash-p) spec
+    (with-slots (body result drivers has-exclusive-hash-p
+                      has-body-insertion-p) spec
       (let* ((exit-conditions
               (i-aggregate-property spec 'exit-conditions #'append))
              (catch-conditions
@@ -308,7 +374,7 @@ HANDLER is the body of the generated function."
                (exit-conditions (car exit-conditions))
                (t t)))
              (vars (nreverse variables))
-             (body (append actions (nreverse body)))
+             (body-all (append actions (reverse body)))
              (hash-driver (when has-exclusive-hash-p (car drivers))))
         (message "exit-conditions %s, catch-conditions %s, vars %s, actions %s econds"
                  exit-conditions catch-conditions vars actions econds)
@@ -327,21 +393,37 @@ HANDLER is the body of the generated function."
                          (lambda (,key ,value)
                            ,@(unless (eq econds t)
                                `(unless ,econds (throw '--maphash nil)))
-                           ,@body) ,hash-sym)
+                           ,@body-all) ,hash-sym)
                         result)))))
          ((and catch-conditions vars)
           (append catch-conditions
                   (list
-                   `(let* (,@vars)
-                      (while ,econds ,@body) result))))
+                   (if has-body-insertion-p
+                       (subst (i--normalize-body body) '--i-body--
+                              `(let* (,@vars)
+                                 (while ,econds ,@actions) result))
+                     `(let* (,@vars)
+                        (while ,econds ,@body-all) result)))))
          (catch-conditions
           (append catch-conditions
                   (list
-                   `(while ,econds ,@body) result)))
+                   (if has-body-insertion-p
+                       (subst (i--normalize-body body) '--i-body--
+                              `(while ,econds ,@actions))
+                     `(while ,econds ,@body-all)) result)))
          (variables
-          `(let* (,@vars)
-             (while ,econds ,@body) ,result))
-         (t `(progn (while ,econds ,@body) ,result)))))))
+          (if has-body-insertion-p
+              (subst (i--normalize-body body) '--i-body--
+                     `(let* (,@vars)
+                        (while ,econds ,@actions) ,result))
+            `(let* (,@vars)
+               (while ,econds ,@body-all) ,result)))
+         (t
+          (if has-body-insertion-p
+              (subst (i--normalize-body body)
+                     '--i-body--
+                     `(progn (while ,econds ,@actions) ,result))
+            `(progn (while ,econds ,@body-all) ,result))))))))
 
 (provide 'i-iterate)
 
