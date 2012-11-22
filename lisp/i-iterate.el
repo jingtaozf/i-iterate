@@ -196,12 +196,16 @@ HANDLER is the body of the generated function."
              ((and (consp var) (consp (cdr var))) ; a proper list
               (let ((varnames var)
                     (varnames-sym (i-gensym spec))
-                    (list-sym (i-gensym spec)) name)
+                    (list-sym (i-gensym spec))
+                    (var-sym (i-gensym spec))
+                    name)
+                (oset driver variables
+                      (cons `(,var-sym ',var) (oref driver variables)))
                 (while varnames
-                  (setq name (car varnames))
+                  (setq name (car varnames) varnames (cdr varnames))
                   (oset driver variables
                         (cons name (oref driver variables))))
-                `((let ((,varnames-sym ,var) (,list-sym ,i-list))
+                `((let ((,varnames-sym ,var-sym) (,list-sym (car ,i-list)))
                     (while ,varnames-sym
                       (set (car ,varnames-sym) (car ,list-sym))
                       (setq ,varnames-sym (cdr ,varnames-sym)
@@ -215,8 +219,8 @@ HANDLER is the body of the generated function."
                 (oset driver variables
                       (append (list key) (list value)
                               (oref driver variables)))
-                `((setq ,key (caar ,i-list) ,value (cadr ,i-list))
-                  (setq ,i-list ,@(list
+                `((setq ,key (caar ,i-list) ,value (cdar ,i-list)
+                        ,i-list ,@(list
                                    (if i-iterator `(funcall ,i-iterator ,i-list)
                                      `(cdr ,i-list)))))))
              (t                           ; just a single variable
