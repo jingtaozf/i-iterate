@@ -462,29 +462,32 @@ HANDLER is the body of the generated function."
     (funcall (gethash (cadr exp) i-for-handlers) spec driver exp)
     (oset spec drivers (cons driver (oref spec drivers)))))
 
-(defun i--parse-collect (exp &optional spec parent-exp)
-  (let ((driver (make-instance 'i-driver))
+(defun i--parse-collect (exp &optional spec)
+  (let ((nestedp (not spec))
+        (driver (make-instance 'i-driver))
         (spec (or spec  i-spec-stack))
         ;; This looks wrong, we've lost something underway
         (exp (if (consp exp) exp (list exp))))
     (destructuring-bind (form &optional into location)
         exp
       (let ((location (or location (i-gensym spec))))
-        (message "collect expansion")
         (oset driver variables `(,location))
-        (oset driver actions
-              `((setq ,location (cons ,form ,location))))
-        (oset spec result location)))
-    (oset spec drivers (cons driver (oref spec drivers)))))
+        (unless nestedp
+          (oset driver actions
+                `((setq ,location (cons ,form ,location)))))
+        (oset spec result `(nreverse ,location))
+        (oset spec drivers (cons driver (oref spec drivers)))
+        (when nestedp `(setq ,location (cons ,form ,location)))))))
 
 (defun i--expand-in-environment (exp &optional env)
   (let ((env (or env macroexpand-all-environment)))
     (macrolet
         ((collect (e)))
-      ;; Need to check here for duplicates, so we don't add same
-      ;; handlers twice
-      (message "environment %s" (append i-expanders env))
-      (macroexpand-all exp (append i-expanders env)))))
+      (let ((e i-expanders))
+        (while e
+          (add-to-list 'env (car e))
+          (setq e (cdr e))))
+      (macroexpand-all exp env))))
 
 (defun i--parse-exp (exp spec)
   (pcase exp
@@ -515,6 +518,20 @@ HANDLER is the body of the generated function."
    ((consp body) (car body))
    (t body)))
 
+(defun i--remove-surplus-progn (exp)
+  "Some macros will generate (prong (form)) calls because it is 
+easy to generate it this way, but we can remove them all when 
+post-processing."
+  (cond
+   ((null exp) nil)
+   ((consp exp)
+    (if (and (eql (car exp) 'progn)
+             (or (null (cdr exp)) (null (cddr exp))))
+        (i--remove-surplus-progn (cadr exp))
+      (cons (i--remove-surplus-progn (car exp))
+            (i--remove-surplus-progn (cdr exp)))))
+   (t exp)))
+
 (defmacro i-iterate (&rest specs)
   (let ((spec (i--parse-specs specs)))
     (with-slots (body result drivers has-exclusive-hash-p
@@ -538,52 +555,53 @@ HANDLER is the body of the generated function."
              (hash-driver (when has-exclusive-hash-p (car drivers))))
         (message "exit-conditions %s, catch-conditions %s, vars %s, actions %s econds"
                  exit-conditions catch-conditions vars actions econds)
-        (cond
-         (has-exclusive-hash-p
-          (let ((key (car (oref hash-driver vars)))
-                (value (cadr (oref hash-driver vars)))
-                (hash (caddr (oref hash-driver vars)))
-                (hash-sym (i-gensym spec)))
-            (unless (eq econds t)
-              (push '((catch '--maphash)) catch-conditions))
-            (append catch-conditions
-                    (list
-                     `(let* ((,hash-sym hash) ,@(cddr vars))
-                        (maphash
-                         (lambda (,key ,value)
-                           ,@(unless (eq econds t)
-                               `(unless ,econds (throw '--maphash nil)))
-                           ,@body-all) ,hash-sym)
-                        result)))))
-         ((and catch-conditions vars)
-          (append catch-conditions
-                  (list
-                   (if has-body-insertion-p
-                       (subst (i--normalize-body body) '--i-body--
-                              `(let* (,@vars)
-                                 (while ,econds ,@actions) result))
-                     `(let* (,@vars)
-                        (while ,econds ,@body-all) result)))))
-         (catch-conditions
-          (append catch-conditions
-                  (list
-                   (if has-body-insertion-p
-                       (subst (i--normalize-body body) '--i-body--
-                              `(while ,econds ,@actions))
-                     `(while ,econds ,@body-all)) result)))
-         (variables
-          (if has-body-insertion-p
-              (subst (i--normalize-body body) '--i-body--
-                     `(let* (,@vars)
-                        (while ,econds ,@actions) ,result))
-            `(let* (,@vars)
-               (while ,econds ,@body-all) ,result)))
-         (t
-          (if has-body-insertion-p
-              (subst (i--normalize-body body)
-                     '--i-body--
-                     `(progn (while ,econds ,@actions) ,result))
-            `(progn (while ,econds ,@body-all) ,result))))))))
+        (i--remove-surplus-progn
+         (cond
+          (has-exclusive-hash-p
+           (let ((key (car (oref hash-driver vars)))
+                 (value (cadr (oref hash-driver vars)))
+                 (hash (caddr (oref hash-driver vars)))
+                 (hash-sym (i-gensym spec)))
+             (unless (eq econds t)
+               (push '((catch '--maphash)) catch-conditions))
+             (append catch-conditions
+                     (list
+                      `(let* ((,hash-sym hash) ,@(cddr vars))
+                         (maphash
+                          (lambda (,key ,value)
+                            ,@(unless (eq econds t)
+                                `(unless ,econds (throw '--maphash nil)))
+                            ,@body-all) ,hash-sym)
+                         result)))))
+          ((and catch-conditions vars)
+           (append catch-conditions
+                   (list
+                    (if has-body-insertion-p
+                        (subst (i--normalize-body body) '--i-body--
+                               `(let* (,@vars)
+                                  (while ,econds ,@actions) result))
+                      `(let* (,@vars)
+                         (while ,econds ,@body-all) result)))))
+          (catch-conditions
+           (append catch-conditions
+                   (list
+                    (if has-body-insertion-p
+                        (subst (i--normalize-body body) '--i-body--
+                               `(while ,econds ,@actions))
+                      `(while ,econds ,@body-all)) result)))
+          (variables
+           (if has-body-insertion-p
+               (subst (i--normalize-body body) '--i-body--
+                      `(let* (,@vars)
+                         (while ,econds ,@actions) ,result))
+             `(let* (,@vars)
+                (while ,econds ,@body-all) ,result)))
+          (t
+           (if has-body-insertion-p
+               (subst (i--normalize-body body)
+                      '--i-body--
+                      `(progn (while ,econds ,@actions) ,result))
+             `(progn (while ,econds ,@body-all) ,result)))))))))
 
 (provide 'i-iterate)
 
