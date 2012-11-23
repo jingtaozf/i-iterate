@@ -215,7 +215,7 @@ next value, each function must accept single argument returning single value")
     "Lisp forms to execute in the iteration body")
    (result
     :initform nil
-    :type list
+    :type (or list atom)
     :documentation "The result form returned after the loop finishes")
    (gen-index
     :initform 0
@@ -245,6 +245,14 @@ expansion of the `i-iterate' macro")
 need to add your own driver")
 (unless i-for-handlers (setq i-for-handlers (make-hash-table)))
 
+(defvar i-expanders '((collect . i--parse-collect))
+  "The expanders used in the nested forms in the `i-iterate' macro")
+
+(defvar i-spec-stack nil
+  "This variable is bound by various expanders when they need to receive the
+reference to the `i-spec' instance assigned to this expansion, but it is not
+possible to pass it with the arguments")
+
 (defmacro i-add-for-handler (name arguments &rest handler)
   "Adds a handler for (for ...) driver. NAME is the name of the generated handler
 and also the key in `i-for-handlers'. It can be a single symbol or a list.
@@ -264,26 +272,19 @@ HANDLER is the body of the generated function."
     `(puthash ',name (lambda (,@arguments &rest rest) ,@handler) i-for-handlers)))
 
 (i-add-for-handler (uprform from downfrom) (spec driver exp)
-  (destructuring-bind (var verb begin target limit how iterator &optional (op '<=))
+  (destructuring-bind (var verb begin &optional target limit how iterator (op '<=))
       exp
     ;; TODO: need to check for constant expressions in iterator and limit
     ;; to possibly avoid generating extra vairables.
     (oset driver variables (list (list var begin)))
-    (oset driver actions
-          (list
-           (list
-            (cond
-             ((member verb '(from upfrom))
-              'incf)
-             ((eql verb 'downfrom)
-              (setq op '>=)
-              'decf))
-            var
-            (when how
-              (let ((sym (i-gensym spec)))
-                (oset driver variables
-                      (cons (list sym iterator) (oref driver variables)))
-                sym)))))
+    (let ((act (if (eql verb 'downfrom) 'decf 'incf))
+          (sym (when how (i-gensym spec))))
+      (if sym 
+          (progn
+            (oset driver variables
+                  (cons (list sym iterator) (oref driver variables)))
+            (oset driver actions `((,act ,var ,sym))))
+        (oset driver actions `((,act ,var)))))
     (setq op
           (cond
            ((eql target 'to) op)
@@ -461,14 +462,41 @@ HANDLER is the body of the generated function."
     (funcall (gethash (cadr exp) i-for-handlers) spec driver exp)
     (oset spec drivers (cons driver (oref spec drivers)))))
 
+(defun i--parse-collect (exp &optional spec parent-exp)
+  (let ((driver (make-instance 'i-driver))
+        (spec (or spec  i-spec-stack))
+        ;; This looks wrong, we've lost something underway
+        (exp (if (consp exp) exp (list exp))))
+    (destructuring-bind (form &optional into location)
+        exp
+      (let ((location (or location (i-gensym spec))))
+        (message "collect expansion")
+        (oset driver variables `(,location))
+        (oset driver actions
+              `((setq ,location (cons ,form ,location))))
+        (oset spec result location)))
+    (oset spec drivers (cons driver (oref spec drivers)))))
+
+(defun i--expand-in-environment (exp &optional env)
+  (let ((env (or env macroexpand-all-environment)))
+    (macrolet
+        ((collect (e)))
+      ;; Need to check here for duplicates, so we don't add same
+      ;; handlers twice
+      (message "environment %s" (append i-expanders env))
+      (macroexpand-all exp (append i-expanders env)))))
+
 (defun i--parse-exp (exp spec)
   (pcase exp
     (`(repeat . ,rest)
      (i--parse-repeat rest spec))
     (`(for . ,rest)
      (i--parse-for rest spec))
+    (`(collect . ,rest)
+     (i--parse-collect rest spec))
     (_ (with-slots (body) spec
-         (push exp body)))))
+         (let ((i-spec-stack spec))
+           (push (i--expand-in-environment exp) body))))))
 
 (defun i--parse-specs (specs)
   "Parses SPECS and creates an AST represented in an instance of
