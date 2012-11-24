@@ -147,6 +147,87 @@
 ;;             (setq --6 (funcall --2 --6))
 ;;             (message "i: %s, j: %s, k: %s" i j k)))))) nil)
 
+;;; Todo:
+;; (for * joined ** by ***) - populates * (can be a variable or
+;; a list of variables with same values from collections **, whre
+;; elements of collections are compared by ***
+;;
+;; (for * distinct ** by ***) - like joined, but only for distinct values,
+;; when there are more then two sequences, at least one pair should fail
+;; comparison
+;;
+;; (for * all-distinct ** by ***) - like joined, but only for distinct values
+;; like distinct, but all pairs must fail comparison
+;;
+;; (for * random ** to ***) - generates random values in range ** to ***. This
+;; driver doesn't have an exit condition
+;;
+;; (for * gaussian ** to ***) - like random, except that values are choosen using
+;; Gaussian distribution (standard deviation).
+;;
+;; (for * product **) - populates * (variable or a list of)
+;; with dot-products of **, e.g. (for (x y) product '(1 2) '(3 4))
+;; will produce:
+;; x = 1 y = 3
+;; x = 1 y = 4
+;; x = 2 y = 3
+;; x = 2 y = 4
+;;
+;; (for * combinations ** of ***) consequently sets * to next combination of **
+;; optionally limiting the number of places to ***
+;;
+;; (for * permutations ** of ***) consequently sets * to next combination of **
+;; optionally limiting the number of spaces to ***
+;;
+;; (for * binary ** check ***) - like across, but moves in halves the length. check
+;; is the function to apply to successive elements, must return negative integer,
+;; zero or positive integer to establish the order.
+;;
+;; (for * reverse ** by ***) - like across, but moves in reverse order, by is the
+;; step size, which equals to one by default.
+;;
+;; (for * shuffle **) - like across, but choses unique random elements at each iteration.
+;;
+;; (for (line|char|word) * (file|buffer) **) - set * to be the line, word or char of the **
+;; (either file or buffer)
+;;
+;; (generate * **) - generates * by calling ** with last value of * bein the argument.
+;; if * is a list, then multiple-value-call is used rather then regular call.
+;;
+;; (with *) - just a declaration and initial values for variables.
+;; (initially *) - execute any code before starting the iteration.
+;; 
+;; (minimize * into **) - return the minimum of *, optionally set ** to the result
+;; (maximize * into **) - return the maximum of *, optionally set ** to the result
+;; (count * into **) - return the number of times this clause trigers, , optionally
+;; set ** to the result
+;; (concatenate * into **) - concatenate * (must be lists), optionally set ** to
+;; the result
+;;
+;; (return *) - unconditionally stop the iteration and return *
+;; (skip **) - don't execute the rest of the body and move to the beginning of the loop.
+;; execute ** (if present) before returning to the beginning of the loop.
+;; (next *) - perform whatever action the driver is already assigned to this variable
+;; (variable must be declared withing generator).
+;;
+;; (previous * of ** (steps ****)? default ***) - sets * to the previous value of **,
+;; and to *** if ** could not have value at that point. if setps is present, then retreat
+;; **** steps back to obtain the value of **
+;;
+;; first-then ...
+;;
+;; sum, multiply, reduce
+;;
+;; uniting, accumulating. with predicates
+;;
+;; (finding * such-that ** (into ***) on-failure ****)
+;;
+;; always, never, thereis
+;;
+;; finish, leave, while, until, finally
+;;
+;; Possible usage examples: create a driver for fibonacci and factorial progressions.
+
 
 ;;; Code:
 
@@ -171,8 +252,19 @@ string."
                      (list 'quote 'documentation) docstring))))))
 
 (i-deferror i-unknown-verb "Unexpected verb `%s'"
-    "Signaled when an unrecognized symbol is encountered while parsing the body
+    "Signalled when an unrecognized symbol is encountered while parsing the body
 of `i-iterate' macro")
+
+(i-deferror i-extra-variables "Extra variable(s) found `%s'"
+  "Signalled when there are unused variables in an expression in expansion of
+`i-iterate' macro")
+
+(i-deferror i-missing-variable "Missing a variable after `%s'"
+  "Signalled when there are not enough variables bound by the following expression
+in expansion of `i-iterate' macro")
+
+(i-deferror i-malformed-expression "The expression `%s' is malformed"
+  "Signalled when the expression is not recognized by the parser of `i-iterate'")
 
 (defclass i-driver ()
   ((variables
@@ -205,7 +297,14 @@ next value, each function must accept single argument returning single value")
     :documentation
     "Conditions to catch outside the main (while ...) loop"))
   :documentation "This class describes a single driver of `i-iterate' macro")
-   
+
+(defclass i-hash-driver (i-driver)
+  ((table :initarg :table
+          :initform nil
+          :type symbol
+          :documentation "The variable pointing at hash table of this driver"))
+  :documentation "This driver is used when generating loops involving hash-tables")
+
 (defclass i-spec ()
   ((body
     :initarg :body
@@ -236,7 +335,12 @@ slot is non-nil, then `i-iterate' will generate the `maphash'.")
     :initform nil
     :type symbol
     :documentation "Non-nil if the body must be inserted in a special place, rather
-than appended after all forms and before the result form."))
+than appended after all forms and before the result form.")
+   (init-form
+    :initform nil
+    :type list
+    :documentation "The form executed before the (while ...) and after the (let ...)
+if any (let ...) form is to be generated. Alternatively, it just precedes (while ...)"))
   :documentation "This class contains a specification of the
 expansion of the `i-iterate' macro")
 
@@ -244,6 +348,11 @@ expansion of the `i-iterate' macro")
   "The table of all handlers for (for ...) driver. Use `i-add-for-handler' if you
 need to add your own driver")
 (unless i-for-handlers (setq i-for-handlers (make-hash-table)))
+
+(defvar i-for-drivers nil
+  "The table of all drivers used in (for ...) expansion. Use `i-add-for-handler' if you
+need to add your own driver")
+(unless i-for-drivers (setq i-for-drivers (make-hash-table)))
 
 (defvar i-expanders '((collect . i--parse-collect))
   "The expanders used in the nested forms in the `i-iterate' macro")
@@ -253,7 +362,7 @@ need to add your own driver")
 reference to the `i-spec' instance assigned to this expansion, but it is not
 possible to pass it with the arguments")
 
-(defmacro i-add-for-handler (name arguments &rest handler)
+(defmacro i-add-for-handler (name arguments &optional driver &rest handler)
   "Adds a handler for (for ...) driver. NAME is the name of the generated handler
 and also the key in `i-for-handlers'. It can be a single symbol or a list.
 ARGUMENTS is the argument list, which looks like this: (SPEC DRIVER EXPRESSION), 
@@ -261,15 +370,25 @@ the first argument will be bound to the instance of `i-spec', creating this driv
 the second argument will be bound to the instance of `i-driver' used to handle
 this (for ...) expression, the last argument is the list of arguments following 
 the for symbol.
+DRIVER is the driver class to be used with this expansion, if omited, `i-driver'
+is used.
 HANDLER is the body of the generated function."
   (declare (indent 2))
+  (unless handler
+    (setq handler (list driver) driver 'i-driver))
+  (unless (child-of-class-p driver 'i-driver)
+    (setq handler (cons driver handler)
+          driver 'i-driver))
   (if (consp name)
       `(let ((names ',name)
              (handler (lambda (,@arguments &rest rest) ,@handler)))
          (while names
            (puthash (car names) handler i-for-handlers)
+           (puthash (car names) ,driver i-for-drivers)
            (setq names (cdr names))))
-    `(puthash ',name (lambda (,@arguments &rest rest) ,@handler) i-for-handlers)))
+    `(progn
+       (puthash ',name (lambda (,@arguments &rest rest) ,@handler) i-for-handlers)
+       (puthash ',name ,driver i-for-drivers))))
 
 (i-add-for-handler (uprform from downfrom) (spec driver exp)
   (destructuring-bind (var verb begin &optional target limit how iterator (op '<=))
@@ -299,6 +418,73 @@ HANDLER is the body of the generated function."
               (cons (list sym limit) (oref driver variables)))
         (oset driver exit-conditions
               (list (list op var sym)))))))
+
+(i-add-for-handler (keys values pairs) (spec driver exp)
+  (destructuring-bind (var verb table &optional limit how)
+      exp
+    ;; TODO: need to check for constant expressions in iterator and limit
+    ;; to possibly avoid generating extra vairables.
+    (when (and (consp var) (not (eql pairs verb)))
+      (signal i-extra-variables (cdr var)))
+    (when (and (symbolp var) (eql pairs verb))
+      (signal i-missing-variable var))
+    (when (and limit (null how))
+      (signal i-malformed-expression (list limit nil)))
+    (let ((key-var
+           (cond
+            ((eql verb keys) var)
+            ((eql verb pairs) (car var))
+            (t nil)))
+          (value-var
+           (cond
+            ((eql verb values) var)
+            ((eql verb pairs) (cdr var))
+            (t nil)))
+          (table-var `(,(i-gensym spec) ,table)))
+      ;; TODO: This part only caters for generating a single hashmap
+      ;; expansion. Need to write the mechanics for genrating an expansion
+      ;; when there are more then one hashmap iterations.
+      (oset driver table (car table-var))
+      (oset driver variables
+            (cond
+             ((and key-var value-var)
+              `(,key-var ,value-var ,table-var))
+             (key-var `(,key-var ,table-var))
+             (value-var `(,value-var ,table-var))))
+      (oset driver actions
+            ;; TODO: need to move the declaration of this function
+            ;; before this place.
+            (i--replace-non-nil
+             `(lambda (k v)
+                --i-limit--
+                ,@(list
+                   (cond
+                    ((and key-var value-var)
+                     `(setq ,key-var k ,value-var v))
+                    (key-var ,(setq key-var k))
+                    (value-var ,(setq value-var v))))
+                --i-body--)
+             '--i-limit--
+             (cond
+              ((null how) nil
+               ((numberp how)
+                (let ((limit-var (i-gensym spec))
+                      (catch-var (i-gensym spec)))
+                  (oset driver variables
+                        (append `((,limit-var 0))
+                                (oref driver variables)))
+                  (oset driver catch-conditions `((catch ,catch-var)))
+                  `(progn
+                     (when (> ,limit-var ,how)
+                       (throw ,catch-var nil))
+                     (incf ,how))))
+               (t                       ; There would be more cases
+                                        ; later, would need to do
+                                        ; full expansion here, but
+                                        ; not doing it for now. Too complex
+                (let ((catch-var (i-gensym spec)))
+                  (oset driver catch-conditions `((catch ,catch-var)))
+                  `(when ,how (throw ,catch-var nil)))))))))))
 
 (i-add-for-handler across (spec driver exp)
   (destructuring-bind (var verb iterated-array &optional how iterator)
@@ -458,7 +644,7 @@ HANDLER is the body of the generated function."
         :actions (list (list 'incf sym))) drivers))))
 
 (defun i--parse-for (exp spec)
-  (let ((driver (make-instance 'i-driver)))
+  (let ((driver (make-instance (gethash (cadr exp) i-for-drivers))))
     (funcall (gethash (cadr exp) i-for-handlers) spec driver exp)
     (oset spec drivers (cons driver (oref spec drivers)))))
 
@@ -510,14 +696,9 @@ HANDLER is the body of the generated function."
       (i--parse-exp (car s) i)
       (setq s (cdr s))) i))
 
-(defun i--normalize-body (body)
-  (cond
-   ((null body) nil)
-   ((and (consp body) (cdr body))
-    (append '(progn) body))
-   ((consp body) (car body))
-   (t body)))
-
+;; TODO: There are certain forms with implicit progn, which we could've
+;; also examined and remove the progn, perhaps worth doing at some later
+;; time, at least for those very popular ones.
 (defun i--remove-surplus-progn (exp)
   "Some macros will generate (prong (form)) calls because it is 
 easy to generate it this way, but we can remove them all when 
@@ -525,17 +706,53 @@ post-processing."
   (cond
    ((null exp) nil)
    ((consp exp)
-    (if (and (eql (car exp) 'progn)
-             (or (null (cdr exp)) (null (cddr exp))))
-        (i--remove-surplus-progn (cadr exp))
-      (cons (i--remove-surplus-progn (car exp))
-            (i--remove-surplus-progn (cdr exp)))))
+    (cond
+     ((and (eql (car exp) 'progn)       ; progn containing single
+                                        ; sexp or symbol
+           (or (null (cdr exp)) (null (cddr exp))))
+      (i--remove-surplus-progn (cadr exp)))
+     ((and (consp (car exp))            ; two subsequent progns
+                                        ; can be merged into one
+           (eql (caar exp) 'progn)
+           (consp (cadr exp))
+           (eql (caadr exp) 'progn))
+      (i--remove-surplus-progn 
+       (list
+        (append '(progn)
+                (mapcan (lambda (x)
+                          (if (eql (car x) 'progn) (cdr x) x))
+                        exp)))))
+     (t (cons (i--remove-surplus-progn (car exp))
+              (i--remove-surplus-progn (cdr exp))))))
    (t exp)))
+
+(defun i--replace-non-nil (exp symb replacement)
+  "Replaces symbol SYMB in expression EXP with REPLACEMENT, if
+it is non-nil, otherwise, removes SYMB from expression."
+  (cond
+   ((null exp) nil)
+   ((consp exp)
+    (if (eql (car exp) symb)
+        (if replacement
+            (cons replacement
+                  (i--replace-non-nil (cdr exp) symb replacement))
+            (i--replace-non-nil (cdr exp) symb replacement))
+      (cons (i--replace-non-nil (car exp) symb replacement)
+            (i--replace-non-nil (cdr exp) symb replacement))))
+   (t exp)))
+
+(defsubst i--replace-non-nil-multi (exp symbols replacements)
+  "Subsequently applies `i--replace-non-nil' to EXP with subsequent
+REPLACEMENTS."
+  (let ((s symbols) (r replacements))
+    (while s
+      (setq exp (i--replace-non-nil exp (car s) (car r))
+            s (cdr s) r (cdr r))) exp))
 
 (defmacro i-iterate (&rest specs)
   (let ((spec (i--parse-specs specs)))
     (with-slots (body result drivers has-exclusive-hash-p
-                      has-body-insertion-p) spec
+                      has-body-insertion-p init-form) spec
       (let* ((exit-conditions
               (i-aggregate-property spec 'exit-conditions #'append))
              (catch-conditions
@@ -551,57 +768,44 @@ post-processing."
                (exit-conditions (car exit-conditions))
                (t t)))
              (vars (nreverse variables))
-             (body-all (append actions (reverse body)))
-             (hash-driver (when has-exclusive-hash-p (car drivers))))
+             (hash-driver (when has-exclusive-hash-p (car drivers)))
+             (mandatory-block
+              (list '--init-form
+                    (list 'while econds
+                          '--actions-form '--body-form) result)))
         (message "exit-conditions %s, catch-conditions %s, vars %s, actions %s econds"
                  exit-conditions catch-conditions vars actions econds)
         (i--remove-surplus-progn
-         (cond
-          (has-exclusive-hash-p
-           (let ((key (car (oref hash-driver vars)))
-                 (value (cadr (oref hash-driver vars)))
-                 (hash (caddr (oref hash-driver vars)))
-                 (hash-sym (i-gensym spec)))
-             (unless (eq econds t)
-               (push '((catch '--maphash)) catch-conditions))
-             (append catch-conditions
-                     (list
-                      `(let* ((,hash-sym hash) ,@(cddr vars))
-                         (maphash
-                          (lambda (,key ,value)
-                            ,@(unless (eq econds t)
-                                `(unless ,econds (throw '--maphash nil)))
-                            ,@body-all) ,hash-sym)
-                         result)))))
-          ((and catch-conditions vars)
-           (append catch-conditions
-                   (list
-                    (if has-body-insertion-p
-                        (subst (i--normalize-body body) '--i-body--
-                               `(let* (,@vars)
-                                  (while ,econds ,@actions) result))
-                      `(let* (,@vars)
-                         (while ,econds ,@body-all) result)))))
-          (catch-conditions
-           (append catch-conditions
-                   (list
-                    (if has-body-insertion-p
-                        (subst (i--normalize-body body) '--i-body--
-                               `(while ,econds ,@actions))
-                      `(while ,econds ,@body-all)) result)))
-          (variables
-           (if has-body-insertion-p
-               (subst (i--normalize-body body) '--i-body--
-                      `(let* (,@vars)
-                         (while ,econds ,@actions) ,result))
-             `(let* (,@vars)
-                (while ,econds ,@body-all) ,result)))
-          (t
-           (if has-body-insertion-p
-               (subst (i--normalize-body body)
-                      '--i-body--
-                      `(progn (while ,econds ,@actions) ,result))
-             `(progn (while ,econds ,@body-all) ,result)))))))))
+         (i--replace-non-nil-multi
+          (cond
+           (has-exclusive-hash-p
+            (let ((key (car (oref hash-driver vars)))
+                  (value (cadr (oref hash-driver vars)))
+                  (hash (caddr (oref hash-driver vars)))
+                  (hash-sym (i-gensym spec)))
+              (unless (eq econds t)
+                (push '((catch '--maphash)) catch-conditions))
+              (append catch-conditions
+                      (list
+                       `(let* ((,hash-sym hash) ,@(cddr vars))
+                          --init-form
+                          (maphash
+                           (lambda (,key ,value)
+                             ,@(unless (eq econds t)
+                                 `(unless ,econds (throw '--maphash nil)))
+                             --actions-form --body-form) ,hash-sym)
+                          result)))))
+           ((and catch-conditions vars)
+            (append catch-conditions
+                    `((let* (,@vars) ,@mandatory-block))))
+           (catch-conditions
+            (append catch-conditions `(,@mandatory-block)))
+           (variables `(let* (,@vars) ,@mandatory-block))
+           (t `(progn ,@mandatory-block)))
+          '(--actions-form --body-form --init-form)
+          (list (append '(progn) actions)
+                (append '(progn) (reverse body))
+                init-form)))))))
 
 (provide 'i-iterate)
 
