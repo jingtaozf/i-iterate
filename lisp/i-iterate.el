@@ -390,6 +390,13 @@ HANDLER is the body of the generated function."
        (puthash ',name (lambda (,@arguments &rest rest) ,@handler) i-for-handlers)
        (puthash ',name ,driver i-for-drivers))))
 
+(defsubst i-constexp-p (exp)
+  (or (atom exp)
+      (and (consp exp)
+           (eql (car exp) 'function)
+           (symbolp (cadr exp)))
+      (and (consp exp) (eql (car exp) 'quote))))
+
 (i-add-for-handler (uprform from downfrom) (spec driver exp)
   (destructuring-bind (var verb begin &optional target limit how iterator (op '<=))
       exp
@@ -555,59 +562,69 @@ HANDLER is the body of the generated function."
             `((< ,i-pos (length ,i-array)))))))
 
 (i-add-for-handler in (spec driver exp)
-  (destructuring-bind (var verb iterated-list how iterator)
+  (destructuring-bind (var verb iterated-list &optional how iterator)
       exp
-    ;; TODO: need to check for constant expressions in iterator and iterated-list
-    ;; to possibly avoid generating extra vairables.
     (let ((i-list (i-gensym spec))
-          (i-iterator (when iterator (i-gensym spec))))
+          (i-iterator
+           (when iterator
+             ;; If `iterator' is a constant expression,
+             ;; it is a function we need to call directly
+             ;; no need to care of multiple evaluations
+             (if (i-constexp-p iterator)
+                 iterator
+               (i-gensym spec)))))
       (oset driver variables
             (if iterator
                 (append (list (list i-list iterated-list))
-                        (list (list i-iterator iterator))
+                        (unless (eql i-iterator iterator)
+                          (list (list i-iterator iterator)))
                         (oref driver variables))
               (cons (list i-list iterated-list)
                     (oref driver variables))))
-      (oset driver actions
-            (cond
-             ((and (consp var) (consp (cdr var))) ; a proper list
-              (let ((varnames var)
-                    (varnames-sym (i-gensym spec))
-                    (list-sym (i-gensym spec))
-                    (var-sym (i-gensym spec))
-                    name)
-                (oset driver variables
-                      (cons `(,var-sym ',var) (oref driver variables)))
-                (while varnames
-                  (setq name (car varnames) varnames (cdr varnames))
+      (let ((iter-exp
+             (cond
+              ((and (consp i-iterator)
+                    (functionp (cadr i-iterator)))
+               `(,(cadr i-iterator) ,i-list))
+              ((and (consp i-iterator)
+                    (functionp i-iterator))
+               `(,i-iterator ,i-list))
+              (i-iterator `(funcall ,i-iterator ,i-list))
+              (t `(cdr ,i-list)))))
+        (oset driver actions
+              (cond
+               ((and (consp var) (consp (cdr var))) ; a proper list
+                (let ((varnames var)
+                      (varnames-sym (i-gensym spec))
+                      (list-sym (i-gensym spec))
+                      (var-sym (i-gensym spec))
+                      name)
                   (oset driver variables
-                        (cons name (oref driver variables))))
-                `((let ((,varnames-sym ,var-sym) (,list-sym (car ,i-list)))
-                    (while ,varnames-sym
-                      (set (car ,varnames-sym) (car ,list-sym))
-                      (setq ,varnames-sym (cdr ,varnames-sym)
-                            ,list-sym (cdr ,list-sym)))
-                    (setq ,i-list ,@(list
-                                     (if i-iterator `(funcall ,i-iterator ,i-list)
-                                       `(cdr ,i-list))))))))
-             ((consp var)               ; a (key . value) pair
-              (let ((key (car var))
-                    (value (cdr var)))
+                        (cons `(,var-sym ',var) (oref driver variables)))
+                  (while varnames
+                    (setq name (car varnames) varnames (cdr varnames))
+                    (oset driver variables
+                          (cons name (oref driver variables))))
+                  `((let ((,varnames-sym ,var-sym) (,list-sym (car ,i-list)))
+                      (while ,varnames-sym
+                        (set (car ,varnames-sym) (car ,list-sym))
+                        (setq ,varnames-sym (cdr ,varnames-sym)
+                              ,list-sym (cdr ,list-sym)))
+                      (setq ,i-list ,@(list iter-exp))))))
+               ((consp var)               ; a (key . value) pair
+                (let ((key (car var))
+                      (value (cdr var)))
+                  (oset driver variables
+                        (append (list key) (list value)
+                                (oref driver variables)))
+                  `((setq ,key (caar ,i-list) ,value (cdar ,i-list)
+                          ,i-list ,@(list iter-exp)))))
+               (t                           ; just a single variable
                 (oset driver variables
-                      (append (list key) (list value)
-                              (oref driver variables)))
-                `((setq ,key (caar ,i-list) ,value (cdar ,i-list)
-                        ,i-list ,@(list
-                                   (if i-iterator `(funcall ,i-iterator ,i-list)
-                                     `(cdr ,i-list)))))))
-             (t                           ; just a single variable
-              (oset driver variables
-                    (cons var (oref driver variables)))
-              `((setq ,var (car ,i-list)
-                      ,i-list ,@(list
-                                 (if i-iterator `(funcall ,i-iterator ,i-list)
-                                   `(cdr ,i-list))))))))
-      (oset driver exit-conditions (list i-list)))))
+                      (cons var (oref driver variables)))
+                `((setq ,var (car ,i-list)
+                        ,i-list ,@(list iter-exp))))))
+        (oset driver exit-conditions (list i-list))))))
 
 (defmethod i-aggregate-property ((spec i-spec) property &optional extractor)
   (with-slots (drivers) spec
@@ -619,10 +636,26 @@ HANDLER is the body of the generated function."
           (push (slot-value (car ds) property) result))
         (setq ds (cdr ds))) result)))
 
+(defmacro i-with-aggregated (properties spec &rest body)
+  (let ((s (gensym)))
+    `(let* ((,s ,spec)
+            ,@(let ((p (reverse properties)) extractor pname result)
+                (while p
+                  (if (consp (car p))
+                      (setq pname (caar p) extractor (cdar p))
+                    (setq pname (car p) extractor #'append))
+                  (setq result
+                        (cons `(,pname
+                                (i-aggregate-property
+                                 ,s ',pname ,extractor)) result))
+                  (setq p (cdr p)))
+                result))
+       ,@body)))
+
 (defmethod i-gensym ((spec i-spec))
   (with-slots (gen-index) spec
     (incf gen-index)
-    (intern (concat "--" (number-to-string (1- gen-index))))))
+    (make-symbol (concat "--" (number-to-string (1- gen-index))))))
 
 (defmethod i-add-driver ((spec i-spec) driver)
   (with-slots (drivers) spec
@@ -640,9 +673,9 @@ HANDLER is the body of the generated function."
       (push 
        (make-instance
         'i-driver
-        :variables (list (list sym 0))
-        :exit-conditions (list (list '< sym (car exp)))
-        :actions (list (list 'incf sym))) drivers))))
+        :variables `((,sym 0))
+        :exit-conditions `((< ,sym ,(car exp)))
+        :actions `((incf ,sym))) drivers))))
 
 (defun i--parse-for (exp spec)
   (let ((driver (make-instance (gethash (cadr exp) i-for-drivers))))
@@ -669,10 +702,9 @@ HANDLER is the body of the generated function."
 (defun i--parse-with (vars spec)
   "Appends variable declarations in VARS to SPEC, an instance of `i-spec'
 VARS can be a symbol or a list"
-  (let ((driver (make-instance 'i-driver))
-        (vars (if (consp vars) vars (list vars))))
-    (oset driver variables `(,vars))
-    (oset spec driver (cons driver (oref spec drivers)))))
+  (let ((driver (make-instance 'i-driver)))
+    (oset driver variables (car vars))
+    (oset spec drivers (cons driver (oref spec drivers)))))
 
 (defun i--expand-in-environment (exp &optional env)
   (let ((env (or env macroexpand-all-environment)))
@@ -687,13 +719,13 @@ VARS can be a symbol or a list"
 (defun i--parse-exp (exp spec)
   (pcase exp
     (`(repeat . ,rest)
-     (i--parse-repeat rest spec))
+     (i--parse-repeat (i--expand-in-environment rest) spec))
     (`(for . ,rest)
-     (i--parse-for rest spec))
+     (i--parse-for (i--expand-in-environment rest) spec))
     (`(collect . ,rest)
-     (i--parse-collect rest spec))
+     (i--parse-collect (i--expand-in-environment rest) spec))
     (`(with . ,rest)
-     (i--parse-with rest spec))
+     (i--parse-with (i--expand-in-environment rest) spec))
     (_ (with-slots (body) spec
          (let ((i-spec-stack spec))
            (push (i--expand-in-environment exp) body))))))
@@ -760,61 +792,59 @@ REPLACEMENTS."
       (setq exp (i--replace-non-nil exp (car s) (car r))
             s (cdr s) r (cdr r))) exp))
 
+;;;###autoload
 (defmacro i-iterate (&rest specs)
+  ;; TODO: see `(elisp) Indenting Macros' for better indenting.
+  (declare (indent 'defun))
   (let ((spec (i--parse-specs specs)))
     (with-slots (body result drivers has-exclusive-hash-p
                       has-body-insertion-p init-form) spec
-      (let* ((exit-conditions
-              (i-aggregate-property spec 'exit-conditions #'append))
-             (catch-conditions
-              (i-aggregate-property spec 'catch-conditions #'append))
-             (variables
-              (i-aggregate-property spec 'variables #'append))
-             (actions
-              (i-aggregate-property spec 'actions #'append))
-             (econds
-              (cond
-               ((cdr exit-conditions)
-                (append '(and) (nreverse exit-conditions)))
-               (exit-conditions (car exit-conditions))
-               (t t)))
-             (vars (nreverse variables))
-             (hash-driver (when has-exclusive-hash-p (car drivers)))
-             (mandatory-block
-              (list '--init-form
-                    (list 'while econds
-                          '--actions-form '--body-form) result)))
-        (i--remove-surplus-progn
-         (i--replace-non-nil-multi
-          (cond
-           (has-exclusive-hash-p
-            (let ((key (car (oref hash-driver vars)))
-                  (value (cadr (oref hash-driver vars)))
-                  (hash (caddr (oref hash-driver vars)))
-                  (hash-sym (i-gensym spec)))
-              (unless (eq econds t)
-                (push '((catch '--maphash)) catch-conditions))
-              (append catch-conditions
-                      (list
-                       `(let* ((,hash-sym hash) ,@(cddr vars))
-                          --init-form
-                          (maphash
-                           (lambda (,key ,value)
-                             ,@(unless (eq econds t)
-                                 `(unless ,econds (throw '--maphash nil)))
-                             --actions-form --body-form) ,hash-sym)
-                          result)))))
-           ((and catch-conditions vars)
-            (append catch-conditions
-                    `((let* (,@vars) ,@mandatory-block))))
-           (catch-conditions
-            (append catch-conditions `(,@mandatory-block)))
-           (variables `(let* (,@vars) ,@mandatory-block))
-           (t `(progn ,@mandatory-block)))
-          '(--actions-form --body-form --init-form)
-          (list (append '(progn) actions)
-                (append '(progn) (reverse body))
-                init-form)))))))
+      (i-with-aggregated
+       (exit-conditions catch-conditions variables actions) spec
+       (let* ((econds
+               (cond
+                ((cdr exit-conditions)
+                 (append '(and) (nreverse exit-conditions)))
+                (exit-conditions (car exit-conditions))
+                (t t)))
+              (vars (nreverse variables))
+              (hash-driver (when has-exclusive-hash-p (car drivers)))
+              (mandatory-block
+               (list '--init-form
+                     (list 'while econds
+                           '--actions-form '--body-form) result)))
+         (i--remove-surplus-progn
+          (i--replace-non-nil-multi
+           (cond
+            (has-exclusive-hash-p
+             (let ((key (car (oref hash-driver vars)))
+                   (value (cadr (oref hash-driver vars)))
+                   (hash (caddr (oref hash-driver vars)))
+                   (hash-sym (i-gensym spec)))
+               (unless (eq econds t)
+                 (push '((catch '--maphash)) catch-conditions))
+               (append catch-conditions
+                       (list
+                        `(let* ((,hash-sym hash) ,@(cddr vars))
+                           --init-form
+                           (maphash
+                            (lambda (,key ,value)
+                              ,@(unless (eq econds t)
+                                  `(unless ,econds (throw '--maphash nil)))
+                              --actions-form --body-form) ,hash-sym)
+                           result)))))
+            ((and catch-conditions vars)
+             (append catch-conditions
+                     `((let* (,@vars) ,@mandatory-block))))
+            (catch-conditions
+             (append catch-conditions `(,@mandatory-block)))
+            (variables `(let* (,@vars) ,@mandatory-block))
+            (t `(progn ,@mandatory-block)))
+           '(--actions-form --body-form --init-form)
+           (list (append '(progn) actions)
+                 (append '(progn) (reverse body))
+                 init-form))))))))
+(defalias '++ 'i-iterate)
 
 (provide 'i-iterate)
 
