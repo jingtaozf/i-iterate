@@ -231,7 +231,7 @@
 
 ;;; Code:
 
-
+(require 'cl)
 (require 'eieio)
 
 (defmacro i-deferror (name message &optional aliases docstring)
@@ -419,72 +419,73 @@ HANDLER is the body of the generated function."
         (oset driver exit-conditions
               (list (list op var sym)))))))
 
-(i-add-for-handler (keys values pairs) (spec driver exp)
-  (destructuring-bind (var verb table &optional limit how)
-      exp
-    ;; TODO: need to check for constant expressions in iterator and limit
-    ;; to possibly avoid generating extra vairables.
-    (when (and (consp var) (not (eql pairs verb)))
-      (signal i-extra-variables (cdr var)))
-    (when (and (symbolp var) (eql pairs verb))
-      (signal i-missing-variable var))
-    (when (and limit (null how))
-      (signal i-malformed-expression (list limit nil)))
-    (let ((key-var
+(i-add-for-handler
+ (keys values pairs) (spec driver exp)
+ (destructuring-bind (var verb table &optional limit how)
+     exp
+   ;; TODO: need to check for constant expressions in iterator and limit
+   ;; to possibly avoid generating extra vairables.
+   (when (and (consp var) (not (eql 'pairs verb)))
+     (signal 'i-extra-variables (cdr var)))
+   (when (and (symbolp var) (eql 'pairs verb))
+     (signal 'i-missing-variable var))
+   (when (and limit (null how))
+     (signal 'i-malformed-expression (list limit nil)))
+   (let ((key-var
+          (cond
+           ((eql verb 'keys) var)
+           ((eql verb 'pairs) (car var))
+           (t nil)))
+         (value-var
+          (cond
+           ((eql verb 'values) var)
+           ((eql verb 'pairs) (cdr var))
+           (t nil)))
+         (table-var `(,(i-gensym spec) ,table)))
+     ;; TODO: This part only caters for generating a single hashmap
+     ;; expansion. Need to write the mechanics for genrating an expansion
+     ;; when there are more then one hashmap iterations.
+     (oset driver table (car table-var))
+     (oset driver variables
            (cond
-            ((eql verb keys) var)
-            ((eql verb pairs) (car var))
-            (t nil)))
-          (value-var
-           (cond
-            ((eql verb values) var)
-            ((eql verb pairs) (cdr var))
-            (t nil)))
-          (table-var `(,(i-gensym spec) ,table)))
-      ;; TODO: This part only caters for generating a single hashmap
-      ;; expansion. Need to write the mechanics for genrating an expansion
-      ;; when there are more then one hashmap iterations.
-      (oset driver table (car table-var))
-      (oset driver variables
+            ((and key-var value-var)
+             `(,key-var ,value-var ,table-var))
+            (key-var `(,key-var ,table-var))
+            (value-var `(,value-var ,table-var))))
+     (oset driver actions
+           ;; TODO: need to move the declaration of this function
+           ;; before this place.
+           (i--replace-non-nil
+            `(lambda (k v)
+               --i-limit--
+               ,@(list
+                  (cond
+                   ((and key-var value-var)
+                    `(setq ,key-var k ,value-var v))
+                   (key-var ,(setq key-var 'k))
+                   (value-var ,(setq value-var 'v))))
+               --i-body--)
+            '--i-limit--
             (cond
-             ((and key-var value-var)
-              `(,key-var ,value-var ,table-var))
-             (key-var `(,key-var ,table-var))
-             (value-var `(,value-var ,table-var))))
-      (oset driver actions
-            ;; TODO: need to move the declaration of this function
-            ;; before this place.
-            (i--replace-non-nil
-             `(lambda (k v)
-                --i-limit--
-                ,@(list
-                   (cond
-                    ((and key-var value-var)
-                     `(setq ,key-var k ,value-var v))
-                    (key-var ,(setq key-var k))
-                    (value-var ,(setq value-var v))))
-                --i-body--)
-             '--i-limit--
-             (cond
-              ((null how) nil
-               ((numberp how)
-                (let ((limit-var (i-gensym spec))
-                      (catch-var (i-gensym spec)))
-                  (oset driver variables
-                        (append `((,limit-var 0))
-                                (oref driver variables)))
-                  (oset driver catch-conditions `((catch ,catch-var)))
-                  `(progn
-                     (when (> ,limit-var ,how)
-                       (throw ,catch-var nil))
-                     (incf ,how))))
-               (t                       ; There would be more cases
-                                        ; later, would need to do
-                                        ; full expansion here, but
-                                        ; not doing it for now. Too complex
-                (let ((catch-var (i-gensym spec)))
-                  (oset driver catch-conditions `((catch ,catch-var)))
-                  `(when ,how (throw ,catch-var nil)))))))))))
+             ((null how) nil)
+             ((numberp how)
+              (let ((limit-var (i-gensym spec))
+                    (catch-var (i-gensym spec)))
+                (oset driver variables
+                      (append `((,limit-var 0))
+                              (oref driver variables)))
+                (oset driver catch-conditions `((catch ,catch-var)))
+                `(progn
+                   (when (> ,limit-var ,how)
+                     (throw ,catch-var nil))
+                   (incf ,how))))
+             (t                       ; There would be more cases
+                                      ; later, would need to do
+                                      ; full expansion here, but
+                                      ; not doing it for now. Too complex
+              (let ((catch-var (i-gensym spec)))
+                (oset driver catch-conditions `((catch ,catch-var)))
+                `(when ,how (throw ,catch-var nil))))))))))
 
 (i-add-for-handler across (spec driver exp)
   (destructuring-bind (var verb iterated-array &optional how iterator)
@@ -665,6 +666,14 @@ HANDLER is the body of the generated function."
         (oset spec drivers (cons driver (oref spec drivers)))
         (when nestedp `(setq ,location (cons ,form ,location)))))))
 
+(defun i--parse-with (vars spec)
+  "Appends variable declarations in VARS to SPEC, an instance of `i-spec'
+VARS can be a symbol or a list"
+  (let ((driver (make-instance 'i-driver))
+        (vars (if (consp vars) vars (list vars))))
+    (oset driver variables `(,vars))
+    (oset spec driver (cons driver (oref spec drivers)))))
+
 (defun i--expand-in-environment (exp &optional env)
   (let ((env (or env macroexpand-all-environment)))
     (macrolet
@@ -683,6 +692,8 @@ HANDLER is the body of the generated function."
      (i--parse-for rest spec))
     (`(collect . ,rest)
      (i--parse-collect rest spec))
+    (`(with . ,rest)
+     (i--parse-with rest spec))
     (_ (with-slots (body) spec
          (let ((i-spec-stack spec))
            (push (i--expand-in-environment exp) body))))))
@@ -773,8 +784,6 @@ REPLACEMENTS."
               (list '--init-form
                     (list 'while econds
                           '--actions-form '--body-form) result)))
-        (message "exit-conditions %s, catch-conditions %s, vars %s, actions %s econds"
-                 exit-conditions catch-conditions vars actions econds)
         (i--remove-surplus-progn
          (i--replace-non-nil-multi
           (cond

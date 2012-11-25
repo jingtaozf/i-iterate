@@ -1,2 +1,4 @@
 * text=auto !eol
+/Makefile -text
+/README -text
 lisp/i-iterate.el -text
