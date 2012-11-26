@@ -169,8 +169,8 @@ by `i-gensym' to pass)."
 (put 'i/test-equals-ignore-gensym
      'ert-explainer 'i/test-explainer-equal)
 
-(ert-deftest i-test-repreat ()
-  "Tests the expansion of i-iterate macro, repeat driver."
+(ert-deftest i-test-repeat ()
+  "Tests the expansion of i-iterate macro, (repeat *) driver."
   (require 'i-iterate)
   (should
    (i/test-equals-ignore-gensym
@@ -179,3 +179,54 @@ by `i-gensym' to pass)."
        (while (< --0 100)
          (incf --0)
          (message "")) nil))))
+
+(ert-deftest i-test-for-in-list ()
+  "Tests the expansion of i-iterate macro, (for (*) in **) driver."
+  (require 'i-iterate)
+  (should
+   (i/test-equals-ignore-gensym
+    (macroexpand
+     '(++ (for (a b) in '((1 2) (3 4)))
+        (message "a: %s, b: %s" a b)))
+    '(let* ((--0 (quote ((1 2) (3 4)))) (--3 (quote (a b))) a b)
+       (while --0
+         (let ((--1 --3) (--2 (car --0)))
+           (while --1
+             (set (car --1) (car --2))
+             (setq --1 (cdr --1) --2 (cdr --2)))
+           (setq --0 (cdr --0)))
+         (message "a: %s, b: %s" a b)) nil))))
+
+(ert-deftest i-test-for-in-symbol ()
+  "Tests the expansion of i-iterate macro, (for * in **) driver."
+  (require 'i-iterate)
+  (should
+   (i/test-equals-ignore-gensym
+    (macroexpand '(++ (for i in '(1 2 3)) (message "i: %s" i)))
+    '(let* ((--0 (quote (1 2 3))) i)
+       (while --0
+         (setq i (car --0) --0 (cdr --0))
+         (message "i: %s" i)) nil))))
+
+(ert-deftest i-test-for-in-alist ()
+  "Tests the expansion of i-iterate macro, (for (* . *) in **) driver."
+  (require 'i-iterate)
+  (should
+   (i/test-equals-ignore-gensym
+    (macroexpand '(++ (for (a . b) in '((1 . -1) (2 . -2) (3 . -3)))
+                    (message "a: %s . b: %s" a b)))
+    '(let* ((--0 (quote ((1 . -1) (2 . -2) (3 . -3)))) b a)
+       (while --0
+         (setq a (caar --0) b (cdar --0) --0 (cdr --0))
+         (message "a: %s . b: %s" a b)) nil))))
+
+(ert-deftest i-test-for-from-to ()
+  "Tests the expansion of i-iterate macro, (for (* . *) in **) driver."
+  (require 'i-iterate)
+  (should
+   (i/test-equals-ignore-gensym
+    (macroexpand '(++ (for i from 0 to 10) (message "i: %s" i)))
+    '(let* ((i 0) (--0 10))
+       (while (<= i --0)
+         (message "i: %s" i)
+         (incf i)) nil))))

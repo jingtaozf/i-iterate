@@ -276,8 +276,13 @@ in expansion of `i-iterate' macro")
     :initarg :actions
     :initform nil
     :type list
-    :documentation "The actions applied to the variables to obtain the
-next value, each function must accept single argument returning single value")
+    :documentation "The code executed by this driver")
+   (epilogue
+    :initarg :epilogue
+    :initform nil
+    :type list
+    :documentation
+    "Similar to actions, except it is placed at the end of the loop")
    (initial-values
     :initarg :initial-values
     :documentation "The initial values of the variables this driver operates on")
@@ -290,7 +295,7 @@ next value, each function must accept single argument returning single value")
     :type list
     :documentation "Conditions that terminate (while ...) loop")
    (needs-inculsion-p
-    :needs-inclusion-p
+    :initarg :needs-inculsion-p
     :initform t
     :type symbol
     :documentation "Non-nil if this driver must be included in the `drivers' list
@@ -422,29 +427,29 @@ HANDLER is the body of the generated function."
       exp
     ;; TODO: need to check for constant expressions in iterator and limit
     ;; to possibly avoid generating extra vairables.
-    (oset driver variables (list (list var begin)))
+    (oset driver variables `((,var ,begin)))
     (let ((act (if (eql verb 'downfrom) 'decf 'incf))
-          (sym (when how (i-gensym spec))))
+          (sym (when how (i-gensym spec))) lh-exp)
       (if sym 
           (progn
             (oset driver variables
                   (cons (list sym iterator) (oref driver variables)))
-            (oset driver actions `((,act ,var ,sym))))
-        (oset driver actions `((,act ,var)))))
-    (setq op
-          (cond
-           ((eql target 'to) op)
-           ((eql target 'downto) '>=)
-           ((eql target 'below) '<)
-           ((eql target 'upto) '>)
-           ((null target) nil)
-           (t (signal 'i-unknown-verb target))))
-    (when op
-      (let ((sym (i-gensym spec)))
-        (oset driver variables
-              (cons (list sym limit) (oref driver variables)))
-        (oset driver exit-conditions
-              (list (list op var sym)))))))
+            (setq lh-exp `(,act ,var ,sym)))
+        (setq lh-exp `(,act ,var)))
+      (oset driver epilogue `(,lh-exp))
+      (setq op
+            (cond
+             ((eql target 'to) op)
+             ((eql target 'downto) '>=)
+             ((eql target 'below) '<)
+             ((eql target 'upto) '>)
+             ((null target) nil)
+             (t (signal 'i-unknown-verb target))))
+      (when op
+        (let ((sym (i-gensym spec)))
+          (oset driver variables
+                (cons (list sym limit) (oref driver variables)))
+          (oset driver exit-conditions `((,op ,var ,sym))))))))
 
 (i-add-for-handler (keys values pairs) (spec driver exp) i-hash-driver
   (destructuring-bind (var verb table &optional limit how)
@@ -553,7 +558,7 @@ HANDLER is the body of the generated function."
                         (key-var ,(setq key-var 'k))
                         (value-var ,(setq value-var 'v))))
                     --i-actions-form
-                    --i-body-form)))
+                    --i-body-form --i-epilogue-form)))
           (when how
             (oset spec break-condition-triggers
                   (cons 
@@ -762,11 +767,14 @@ HANDLER is the body of the generated function."
        (make-instance
         'i-driver
         :variables `((,sym 0))
+        :needs-inculsion-p t
         :exit-conditions `((< ,sym ,(car exp)))
         :actions `((incf ,sym))) drivers))))
 
 (defun i--parse-for (exp spec)
-  (let ((driver (make-instance (gethash (cadr exp) i-for-drivers))))
+  (let ((driver
+         (make-instance (gethash (cadr exp) i-for-drivers)
+                        :needs-inculsion-p t)))
     (funcall (gethash (cadr exp) i-for-handlers) spec driver exp)
     (when (oref driver needs-inculsion-p)
       (oset spec drivers (cons driver (oref spec drivers))))))
@@ -886,7 +894,7 @@ REPLACEMENTS."
                       has-body-insertion-p init-form
                       break-condition continue-condition) spec
       (i-with-aggregated
-       (exit-conditions variables actions) spec
+       (exit-conditions variables actions epilogue) spec
        (let* ((econds
                (cond
                 ((cdr exit-conditions)
@@ -902,7 +910,8 @@ REPLACEMENTS."
                (cond
                 ((null hash-drivers)
                  `(--i-init-form
-                   (while ,econds --i-actions-form --i-body-form)))
+                   (while ,econds --i-actions-form
+                          --i-body-form --i-epilogue-form)))
                 ((cdr hash-drivers)     ; TODO: Too much reversing here
                                         ; need to cache some of it
                  (let ((additional-vars
@@ -942,10 +951,13 @@ REPLACEMENTS."
                 (catch ',break-condition (,@mandatory-block)) ,result))
             (variables `(let* (,@vars) ,@mandatory-block ,result))
             (t `(progn ,@mandatory-block ,result)))
-           '(--i-actions-form --i-body-form --i-init-form --i-break-form)
+           '(--i-actions-form
+             --i-body-form
+             --i-init-form --i-break-form --i-epilogue-form)
            (list (append '(progn) actions)
                  (append '(progn) (reverse body))
-                 init-form break-form))))))))
+                 init-form break-form
+                 (append '(progn) epilogue)))))))))
 (defalias '++ 'i-iterate)
 
 (provide 'i-iterate)
