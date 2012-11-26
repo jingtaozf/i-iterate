@@ -288,14 +288,13 @@ next value, each function must accept single argument returning single value")
     :initarg :exit-conditions
     :initform nil
     :type list
-    :documentation
-    "Conditions to test in the main (while ...) expression")
-   (catch-conditions
-    :initarg :catch-conditions
-    :initform nil
-    :type list
-    :documentation
-    "Conditions to catch outside the main (while ...) loop"))
+    :documentation "Conditions that terminate (while ...) loop")
+   (needs-inculsion-p
+    :needs-inclusion-p
+    :initform t
+    :type symbol
+    :documentation "Non-nil if this driver must be included in the `drivers' list
+in the `i-spec' (some drivers may not need it)."))
   :documentation "This class describes a single driver of `i-iterate' macro")
 
 (defclass i-hash-driver (i-driver)
@@ -316,6 +315,26 @@ next value, each function must accept single argument returning single value")
     :initform nil
     :type (or list atom)
     :documentation "The result form returned after the loop finishes")
+   (break-condition
+    :initform nil
+    :type (or symbol null)
+    :documentation "If this is non-nil, this is the symbol marker of the
+catch block outside the main loop")
+   (break-condition-triggers
+    :initform nil
+    :type list
+    :documentation
+    "The list of all conditions to trigger immediate exit from loop")
+   (continue-condition
+    :initform nil
+    :type (or symbol null)
+    :documentation  "If this is non-nil, this is the symbol marker of the
+catch block inside the main loop")
+   (continue-condition-triggers
+    :initform nil
+    :type (or symbol null)
+    :documentation
+    "The list of all conditions to trigger skipping to the beginning of loop")
    (gen-index
     :initform 0
     :type integer
@@ -325,12 +344,12 @@ next value, each function must accept single argument returning single value")
     :type list
     :documentation 
     "This slot contains the list of all drivers used in this iteration macro")
-   (has-exclusive-hash-p
+   (hash-drivers
     :initform nil
-    :type symbol
-    :documentation "In case there is only one driver which iterates over
-a hash-table, we can generate a (maphash ...) instead of (while ...). If this 
-slot is non-nil, then `i-iterate' will generate the `maphash'.")
+    :type list
+    :documentation "The list of `i-hash-driver's. If this is not nil, then
+the body has already been placed inside the first driver. If there are multiple
+hash drivers, then the code generated for subsequent drivers must be different. ")
    (has-body-insertion-p
     :initform nil
     :type symbol
@@ -373,7 +392,7 @@ the for symbol.
 DRIVER is the driver class to be used with this expansion, if omited, `i-driver'
 is used.
 HANDLER is the body of the generated function."
-  (declare (indent 2))
+  (declare (indent defun))
   (unless handler
     (setq handler (list driver) driver 'i-driver))
   (unless (child-of-class-p driver 'i-driver)
@@ -398,7 +417,8 @@ HANDLER is the body of the generated function."
       (and (consp exp) (eql (car exp) 'quote))))
 
 (i-add-for-handler (uprform from downfrom) (spec driver exp)
-  (destructuring-bind (var verb begin &optional target limit how iterator (op '<=))
+  (destructuring-bind
+      (var verb begin &optional target limit how iterator (op '<=))
       exp
     ;; TODO: need to check for constant expressions in iterator and limit
     ;; to possibly avoid generating extra vairables.
@@ -426,73 +446,141 @@ HANDLER is the body of the generated function."
         (oset driver exit-conditions
               (list (list op var sym)))))))
 
-(i-add-for-handler
- (keys values pairs) (spec driver exp)
- (destructuring-bind (var verb table &optional limit how)
-     exp
-   ;; TODO: need to check for constant expressions in iterator and limit
-   ;; to possibly avoid generating extra vairables.
-   (when (and (consp var) (not (eql 'pairs verb)))
-     (signal 'i-extra-variables (cdr var)))
-   (when (and (symbolp var) (eql 'pairs verb))
-     (signal 'i-missing-variable var))
-   (when (and limit (null how))
-     (signal 'i-malformed-expression (list limit nil)))
-   (let ((key-var
-          (cond
-           ((eql verb 'keys) var)
-           ((eql verb 'pairs) (car var))
-           (t nil)))
-         (value-var
-          (cond
-           ((eql verb 'values) var)
-           ((eql verb 'pairs) (cdr var))
-           (t nil)))
-         (table-var `(,(i-gensym spec) ,table)))
-     ;; TODO: This part only caters for generating a single hashmap
-     ;; expansion. Need to write the mechanics for genrating an expansion
-     ;; when there are more then one hashmap iterations.
-     (oset driver table (car table-var))
-     (oset driver variables
+(i-add-for-handler (keys values pairs) (spec driver exp) i-hash-driver
+  (destructuring-bind (var verb table &optional limit how)
+      exp
+    ;; TODO: need to check for constant expressions in iterator and limit
+    ;; to possibly avoid generating extra vairables.
+    ;; Also, when iterating over multiple hash-tables it might be possible
+    ;; to optimize the generation of ranges by finding out what limit
+    ;; is smaller.
+    (when (and (consp var) (not (eql 'pairs verb)))
+      (signal 'i-extra-variables (cdr var)))
+    (when (and (symbolp var) (eql 'pairs verb))
+      (signal 'i-missing-variable var))
+    (when (and limit (null how))
+      (signal 'i-malformed-expression (list limit nil)))
+    (let ((key-var
            (cond
-            ((and key-var value-var)
-             `(,key-var ,value-var ,table-var))
-            (key-var `(,key-var ,table-var))
-            (value-var `(,value-var ,table-var))))
-     (oset driver actions
-           ;; TODO: need to move the declaration of this function
-           ;; before this place.
-           (i--replace-non-nil
-            `(lambda (k v)
-               --i-limit--
-               ,@(list
-                  (cond
-                   ((and key-var value-var)
-                    `(setq ,key-var k ,value-var v))
-                   (key-var ,(setq key-var 'k))
-                   (value-var ,(setq value-var 'v))))
-               --i-body--)
-            '--i-limit--
+            ((eql verb 'keys) var)
+            ((eql verb 'pairs) (car var))
+            (t nil)))
+          (value-var
+           (cond
+            ((eql verb 'values) var)
+            ((eql verb 'pairs)
+             (if (consp (cdr var)) (cadr var) (cdr var)))
+            (t nil)))
+          (table-var
+           (if (symbolp table)
+               table `(,(i-gensym spec) ,table))))
+      ;; TODO: This part only caters for generating a single hashmap
+      ;; expansion. Need to write the mechanics for genrating an expansion
+      ;; when there are more then one hashmap iterations.
+      (oset driver table (car table-var))
+      (oset driver needs-inculsion-p nil)
+      (oset driver variables
             (cond
-             ((null how) nil)
-             ((numberp how)
-              (let ((limit-var (i-gensym spec))
-                    (catch-var (i-gensym spec)))
-                (oset driver variables
-                      (append `((,limit-var 0))
-                              (oref driver variables)))
-                (oset driver catch-conditions `((catch ,catch-var)))
-                `(progn
-                   (when (> ,limit-var ,how)
-                     (throw ,catch-var nil))
-                   (incf ,how))))
-             (t                       ; There would be more cases
-                                      ; later, would need to do
-                                      ; full expansion here, but
-                                      ; not doing it for now. Too complex
-              (let ((catch-var (i-gensym spec)))
-                (oset driver catch-conditions `((catch ,catch-var)))
-                `(when ,how (throw ,catch-var nil))))))))))
+             ((and key-var value-var)
+              `(,key-var ,value-var ,table-var))
+             (key-var `(,key-var ,table-var))
+             (value-var `(,value-var ,table-var))))
+      (let ((hdrivers (oref spec hash-drivers)))
+        (if hdrivers
+            (progn                        ; Multiple hash-tables
+              (oset spec hash-drivers (cons driver hdrivers))
+              (let* ((accumulator (i-gensym spec))
+                     (keys-list
+                      `((,(i-gensym spec)
+                         (let (,accumulator)
+                           (maphash
+                            (lambda (k v)
+                              (setq ,accumulator (cons k ,accumulator)))
+                            ;; reversing `accumulator' here is a bit extra,
+                            ;; since hash-tables aren't meant to be ordered
+                            ;; however, very often they are (unless you
+                            ;; delete and instert intecheangeably), so we'll
+                            ;; do a bit extra work here.
+                            ,(car table-var)) (nreverse ,accumulator))))))
+                (oset driver variables (append keys-list (oref driver variables)))
+                (oset driver actions
+                      (list
+                       (append
+                        (cond
+                         ((and key-var value-var)
+                          `(setq ,key-var (car ,(caar keys-list))
+                                 ,value-var
+                                 (gethash (car ,(caar keys-list)) ,(car table-var))))
+                         (key-var
+                          `(setq ,key-var (car ,(caar keys-list))))
+                         (value-var
+                          `(setq ,value-var
+                                 (gethash (car ,(caar keys-list)) ,(car table-var)))))
+                        `(,(caar keys-list) (cdr ,(caar keys-list))))))
+                ;; Whoops... don't know what to do here, need to analyze previous
+                ;; limit condition and perhaps change it or ignore this one.
+                ;; Simple solution for now: just break from loop on limit
+                ;; This block is the copy-paste of the similar block in the other
+                ;; branch, but it will be different some day.
+                (when how
+                  (oset spec break-condition-triggers
+                        (cons 
+                         (cond
+                          ((atom how) 
+                           (let ((limit-var (i-gensym spec))
+                                 (catch-var (oref spec break-condition)))
+                             (oset driver variables
+                                   (append `((,limit-var 0))
+                                           (oref driver variables)))
+                             (oset driver actions
+                                   (append `((incf ,limit-var))
+                                           (oref driver actions)))
+                             `(> ,limit-var ,how)))
+                          (t            ; There would be more cases
+                                        ; later, would need to do
+                                        ; full expansion here, but
+                                        ; not doing it for now. Too complex
+                           (list how)))
+                         (oref spec break-condition-triggers))))))
+          (oset spec hash-drivers (list driver))
+          (oset driver actions
+                `((lambda (k v)
+                    --i-break-form
+                    ,@(list
+                       (cond
+                        ((and key-var value-var)
+                         `(setq ,key-var k ,value-var v))
+                        (key-var ,(setq key-var 'k))
+                        (value-var ,(setq value-var 'v))))
+                    --i-actions-form
+                    --i-body-form)))
+          (when how
+            (oset spec break-condition-triggers
+                  (cons 
+                   (cond
+                    ((atom how) 
+                     (let ((limit-var (i-gensym spec))
+                           (catch-var
+                            (or (oref spec break-condition)
+                                (i-gensym spec))))
+                       (oset driver variables
+                             (append `((,limit-var 0))
+                                     (oref driver variables)))
+                       (oset spec break-condition catch-var)
+                       (oset driver actions
+                             (append `((incf ,limit-var))
+                                     (oref driver actions)))
+                       `(> ,limit-var ,how)))
+                    (t            ; There would be more cases
+                                  ; later, would need to do
+                                  ; full expansion here, but
+                                  ; not doing it for now. Too complex
+                     (let ((catch-var
+                            (or (oref spec break-condition)
+                                (i-gensym spec))))
+                       (oset spec break-condition catch-var)
+                       (list how))))
+                   (oref spec break-condition-triggers)))))))))
 
 (i-add-for-handler across (spec driver exp)
   (destructuring-bind (var verb iterated-array &optional how iterator)
@@ -643,7 +731,7 @@ HANDLER is the body of the generated function."
                 (while p
                   (if (consp (car p))
                       (setq pname (caar p) extractor (cdar p))
-                    (setq pname (car p) extractor #'append))
+                    (setq pname (car p) extractor '(function append)))
                   (setq result
                         (cons `(,pname
                                 (i-aggregate-property
@@ -680,7 +768,8 @@ HANDLER is the body of the generated function."
 (defun i--parse-for (exp spec)
   (let ((driver (make-instance (gethash (cadr exp) i-for-drivers))))
     (funcall (gethash (cadr exp) i-for-handlers) spec driver exp)
-    (oset spec drivers (cons driver (oref spec drivers)))))
+    (when (oref driver needs-inculsion-p)
+      (oset spec drivers (cons driver (oref spec drivers))))))
 
 (defun i--parse-collect (exp &optional spec)
   (let ((nestedp (not spec))
@@ -739,9 +828,6 @@ VARS can be a symbol or a list"
       (i--parse-exp (car s) i)
       (setq s (cdr s))) i))
 
-;; TODO: There are certain forms with implicit progn, which we could've
-;; also examined and remove the progn, perhaps worth doing at some later
-;; time, at least for those very popular ones.
 (defun i--remove-surplus-progn (exp)
   "Some macros will generate (prong (form)) calls because it is 
 easy to generate it this way, but we can remove them all when 
@@ -754,17 +840,16 @@ post-processing."
                                         ; sexp or symbol
            (or (null (cdr exp)) (null (cddr exp))))
       (i--remove-surplus-progn (cadr exp)))
-     ((and (consp (car exp))            ; two subsequent progns
-                                        ; can be merged into one
-           (eql (caar exp) 'progn)
-           (consp (cadr exp))
-           (eql (caadr exp) 'progn))
-      (i--remove-surplus-progn 
-       (list
-        (append '(progn)
-                (mapcan (lambda (x)
-                          (if (eql (car x) 'progn) (cdr x) x))
-                        exp)))))
+     ;; some known implicit progns
+     ((and (member (car exp) '(while lambda catch when unless))
+           (some (lambda (x) (and (consp x) (eql (car x) 'progn)))
+                 (cdr exp)))
+      (cons (car exp)
+            (i--remove-surplus-progn 
+             (mapcan (lambda (x)
+                       (if (and (consp x) (eql (car x) 'progn))
+                           (cdr x) (list x)))
+                     (cdr exp)))))
      (t (cons (i--remove-surplus-progn (car exp))
               (i--remove-surplus-progn (cdr exp))))))
    (t exp)))
@@ -795,12 +880,13 @@ REPLACEMENTS."
 ;;;###autoload
 (defmacro i-iterate (&rest specs)
   ;; TODO: see `(elisp) Indenting Macros' for better indenting.
-  (declare (indent 'defun))
+  (declare (indent defun))
   (let ((spec (i--parse-specs specs)))
-    (with-slots (body result drivers has-exclusive-hash-p
-                      has-body-insertion-p init-form) spec
+    (with-slots (body result drivers hash-drivers
+                      has-body-insertion-p init-form
+                      break-condition continue-condition) spec
       (i-with-aggregated
-       (exit-conditions catch-conditions variables actions) spec
+       (exit-conditions variables actions) spec
        (let* ((econds
                (cond
                 ((cdr exit-conditions)
@@ -808,42 +894,58 @@ REPLACEMENTS."
                 (exit-conditions (car exit-conditions))
                 (t t)))
               (vars (nreverse variables))
-              (hash-driver (when has-exclusive-hash-p (car drivers)))
+              (break-form
+               (when (oref spec break-condition)
+                 `(when (or ,@(oref spec break-condition-triggers))
+                    (throw ',(oref spec break-condition) nil))))
               (mandatory-block
-               (list '--init-form
-                     (list 'while econds
-                           '--actions-form '--body-form) result)))
+               (cond
+                ((null hash-drivers)
+                 `(--i-init-form
+                   (while ,econds --i-actions-form --i-body-form)))
+                ((cdr hash-drivers)     ; TODO: Too much reversing here
+                                        ; need to cache some of it
+                 (let ((additional-vars
+                        (reduce
+                         #'append
+                         (mapcar (lambda (x) (reverse (oref x variables)))
+                                 hash-drivers)))
+                       (additional-actions
+                        (reduce
+                         #'append
+                         (mapcar (lambda (x) (reverse (oref x actions)))
+                                 (cdr (reverse hash-drivers))))))
+                   (setq vars (append additional-vars vars))
+                   (setq actions (append additional-actions actions))
+                   `(--i-init-form
+                     (maphash
+                      ,(car (reverse (oref (car (reverse hash-drivers)) actions)))
+                              ,(oref (car (reverse hash-drivers)) table)))))
+                (t                      ; We have a single hash-driver
+                                        ; so we need to remove it's actions
+                                        ; from `actions' and place them here
+                 (let* ((hd (car hash-drivers))
+                        (hactions (oref hd actions))
+                        (htable (oref hd table)))
+                   (setq vars (append (oref hd variables) vars))
+                   `(--i-init-form
+                     (maphash ,(car hactions) ,htable)))))))
          (i--remove-surplus-progn
           (i--replace-non-nil-multi
            (cond
-            (has-exclusive-hash-p
-             (let ((key (car (oref hash-driver vars)))
-                   (value (cadr (oref hash-driver vars)))
-                   (hash (caddr (oref hash-driver vars)))
-                   (hash-sym (i-gensym spec)))
-               (unless (eq econds t)
-                 (push '((catch '--maphash)) catch-conditions))
-               (append catch-conditions
-                       (list
-                        `(let* ((,hash-sym hash) ,@(cddr vars))
-                           --init-form
-                           (maphash
-                            (lambda (,key ,value)
-                              ,@(unless (eq econds t)
-                                  `(unless ,econds (throw '--maphash nil)))
-                              --actions-form --body-form) ,hash-sym)
-                           result)))))
-            ((and catch-conditions vars)
-             (append catch-conditions
-                     `((let* (,@vars) ,@mandatory-block))))
-            (catch-conditions
-             (append catch-conditions `(,@mandatory-block)))
-            (variables `(let* (,@vars) ,@mandatory-block))
-            (t `(progn ,@mandatory-block)))
-           '(--actions-form --body-form --init-form)
+            ((and break-condition vars)
+             `(progn
+                (let* (,@vars) (catch ',break-condition ,@mandatory-block)
+                      ,result)))
+            (break-condition
+             `(progn
+                (catch ',break-condition (,@mandatory-block)) ,result))
+            (variables `(let* (,@vars) ,@mandatory-block ,result))
+            (t `(progn ,@mandatory-block ,result)))
+           '(--i-actions-form --i-body-form --i-init-form --i-break-form)
            (list (append '(progn) actions)
                  (append '(progn) (reverse body))
-                 init-form))))))))
+                 init-form break-form))))))))
 (defalias '++ 'i-iterate)
 
 (provide 'i-iterate)

@@ -1,4 +1,4 @@
-# So far only builds the documentation for haxe-mode (what's available)
+# Compiles, tests and packages i-iterate.el
 # and bytecode compilation of *.el files
 
 PACKAGE = i-iterate
@@ -38,3 +38,7 @@ zip: default
 	zip -r ${PACKAGE}.zip ${PACKAGE}
 
 package: tar.bz2 zip
+
+test:
+	emacs -batch -L ./lisp -l ert -l ./tests/i-test.el \
+	-f ert-run-tests-batch-and-exit
