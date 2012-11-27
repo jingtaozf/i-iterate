@@ -271,7 +271,7 @@ when used in combination with more pairs."
             test-hash))
          (nreverse --5))))))
 
-(ert-deftest i-test-for-pairs-pairs ()
+(ert-deftest i-test-with ()
   "Tests the expansion of i-iterate macro, (for (*) pairs **) driver
 when used in combination with more pairs."
   (require 'i-iterate)
