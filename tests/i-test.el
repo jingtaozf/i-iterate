@@ -26,126 +26,19 @@
 ;;    0.0.0 - This is not usable yet.
 ;;
 
-;;; Usage:
-;; Below are few examples of macroexpansions
-
-;; (macroexpand
-;;  '(i-iterate (repeat 100)
-;;              (repeat 43)
-;;              (message "hellow there!")))
-;; (let* ((--0 0) (--1 0))
-;;   (while (and (<= --0 100) (<= --1 43))
-;;     (incf --0) (incf --1) (message "hellow there!")) nil)
-
-;; (macroexpand
-;;  '(i-iterate (for i from 1 to 42 by 6)
-;;              (message "hellow there!")))
-;; (let* ((i 1) (--0 6) (--1 42))
-;;   (while (<= i --1)
-;;     (incf i --0) (message "hellow there!")) nil)
-
-;; (macroexpand
-;;  '(i-iterate (for i downfrom 1 to -8 by 2)
-;;              (message "hellow there!")))
-;; (let* ((i 1) (--0 2) (--1 -8))
-;;   (while (>= i --1)
-;;     (decf i --0)
-;;     (message "hellow there!")) nil)
-
-;; (format "%S" (macroexpand '(i-iterate (for blah in '(1 2 3 4) by #'cddr) (message "blah: %s" blah))))
-;; (let* ((--1 (function cddr)) (--0 (quote (1 2 3 4))) blah)
-;;   (while --0
-;;     (setq blah (car --0) --0 (funcall --1 --0))
-;;     (message "blah: %s" blah)) nil)
-
-;; (format "%S" (macroexpand '(i-iterate (for (blah . blerh) in '((1 . 2) (3 . 4) (5 . 6)) by #'cddr)
-;;                                       (message "blah: %s blerh %s" blah blerh))))
-;; (let* ((--1 (function cddr)) (--0 (quote ((1 . 2) (3 . 4) (5 . 6)))) blerh blah)
-;;   (while --0
-;;     (setq blah (caar --0) 
-;;           blerh (cdar --0)
-;;           --0 (funcall --1 --0))
-;;     (message "blah: %s blerh %s" blah blerh)) nil)
-
-;; (format "%S" (macroexpand '(i-iterate (for (a b c) in '((1 2 3) (a b c) (i ii iii)) by #'cddr)
-;;                                       (message "a: %s b: %s c: %s" a b c))))
-;; (let* ((--1 (function cddr)) (--0 (quote ((1 2 3) (a b c) (i ii iii)))) (--4 (quote (a b c))) a b c)
-;;   (while --0
-;;     (let ((--2 --4) (--3 (car --0)))
-;;       (while --2
-;;         (set (car --2) (car --3))
-;;         (setq --2 (cdr --2) --3 (cdr --3)))
-;;       (setq --0 (funcall --1 --0)))
-;;     (message "a: %s b: %s c: %s" a b c)) nil)
-
-;; (macroexpand '(i-iterate (for i across [1 2 3 4]) (message "i: %d" i)))
-;; (let* ((--0 [1 2 3 4]) (--1 0) i)
-;;   (while (< --1 (length --0))
-;;     (setq i (aref --0 --1))
-;;     (incf --1)
-;;     (message "i: %d" i)) nil)
-
-;; (format "%S"
-;;         (macroexpand
-;;          '(i-iterate (for (i j k) across 
-;;                           [[[1 2 3 4] [5 5 5 5] [1 2 3 4]]
-;;                            [[4 4 4 4] [1 2 3 4] [1 2 3 4]]
-;;                            [[1 2 3 4] [a b c d] [1 2 3 4]]
-;;                            [[1 2 3 4] [1 2 3 4] [i ii iii iv]]])
-;;                      (message "i: %s, j: %s, k: %s" i j k))))
-;; (let* ((--0 [[[1 2 3 4] [5 5 5 5] [1 2 3 4]]
-;;              [[4 4 4 4] [1 2 3 4] [1 2 3 4]]
-;;              [[1 2 3 4] [a b c d] [1 2 3 4]]
-;;              [[1 2 3 4] [1 2 3 4] [i ii iii iv]]])
-;;        (--1 0) k j i)
-;;   (while (< --1 (length --0))
-;;     (setq i (aref --0 --1))
-;;     (incf --1)
-;;     (let ((--2 0))
-;;       (while (< --2 (length i))
-;;         (setq j (aref i --2))
-;;         (incf --2)
-;;         (let ((--3 0))
-;;           (while (< --3 (length j))
-;;             (setq k (aref j --3))
-;;             (incf --3)
-;;             (message "i: %s, j: %s, k: %s" i j k)))))) nil)
-
-;; (format "%S"
-;;         (macroexpand
-;;          '(i-iterate (for (i j k) across 
-;;                           [[[1 2 3 4] [5 5 5 5] [1 2 3 4]]
-;;                            [[4 4 4 4] [1 2 3 4] [1 2 3 4]]
-;;                            [[1 2 3 4] [a b c d] [1 2 3 4]]
-;;                            [[1 2 3 4] [1 2 3 4] [i ii iii iv]]] 
-;;                           by (1+ (lambda (x) (+ 2 x)) 1+))
-;;                      (message "i: %s, j: %s, k: %s" i j k))))
-;; (let* ((--2 1+)
-;;        (--3 (lambda (x) (+ 2 x)))
-;;        (--4 1+)
-;;        (--0 [[[1 2 3 4] [5 5 5 5] [1 2 3 4]]
-;;              [[4 4 4 4] [1 2 3 4] [1 2 3 4]]
-;;              [[1 2 3 4] [a b c d] [1 2 3 4]]
-;;              [[1 2 3 4] [1 2 3 4] [i ii iii iv]]])
-;;        (--1 0) k j i)
-;;   (while (< --1 (length --0))
-;;     (setq i (aref --0 --1))
-;;     (setq --1 (funcall --4 --1))
-;;     (let ((--5 0))
-;;       (while (< --5 (length i))
-;;         (setq j (aref i --5))
-;;         (setq --5 (funcall --3 --5))
-;;         (let ((--6 0))
-;;           (while (< --6 (length j))
-;;             (setq k (aref j --6))
-;;             (setq --6 (funcall --2 --6))
-;;             (message "i: %s, j: %s, k: %s" i j k)))))) nil)
+;;; Usage: Eval buffer and run M-x ert RET t RET
 
 ;;; Todo:
 
 
 ;;; Code:
 
+;; TODO: This is the case of α-equivalence, which we are not
+;; <http://en.wikipedia.org/wiki/Alpha_conversion#Alpha_equivalence>
+;; doing properly at the moment. I.e. we should record the
+;; environment and the free variables in environment and compare
+;; their usage in different functions. Some day I'm smarter,
+;; I might do it...
 (defun i/test-equals-ignore-gensym (a b)
   "Tests trees A and B for equality, but considers symbols
 equal if their names are equal (this allows symbols generated
@@ -162,10 +55,55 @@ by `i-gensym' to pass)."
        (t nil))))
 
 (defun i/test-explainer-equal (a b)
-  "Explains why `i/test-equals-ignore-gensym' failed."
-  ;; TODO: Write our own explanation, this will trigger when
-  ;; necessary, but will not always display the correct message.
-  (ert--explain-equal-rec a b))
+  "Explains why `i/test-equals-ignore-gensym' failed.
+This is, basically, only slightly altered `ert--explain-equal'"
+  (if (not (equal (type-of a) (type-of b)))
+      `(different-types ,a ,b)
+    (etypecase a
+      (cons
+       (let ((a-proper-p (ert--proper-list-p a))
+             (b-proper-p (ert--proper-list-p b)))
+         (if (not (eql (not a-proper-p) (not b-proper-p)))
+             `(one-list-proper-one-improper ,a ,b)
+           (if a-proper-p
+               (if (not (equal (length a) (length b)))
+                   `(proper-lists-of-different-length
+                     ,(length a) ,(length b)
+                     ,a ,b
+                     first-mismatch-at
+                     ,(ert--mismatch a b))
+                 (loop for i from 0
+                       for ai in a
+                       for bi in b
+                       for xi = (ert--explain-equal-rec ai bi)
+                       do (when xi (return `(list-elt ,i ,xi)))
+                       finally (assert (equal a b) t)))
+             (let ((car-x (ert--explain-equal-rec (car a) (car b))))
+               (if car-x
+                   `(car ,car-x)
+                 (let ((cdr-x (ert--explain-equal-rec (cdr a) (cdr b))))
+                   (if cdr-x
+                       `(cdr ,cdr-x)
+                     (assert (equal a b) t)
+                     nil))))))))
+      (array (if (not (equal (length a) (length b)))
+                 `(arrays-of-different-length
+                   ,(length a) ,(length b)
+                   ,a ,b
+                   ,@(unless (char-table-p a)
+                       `(first-mismatch-at
+                         ,(ert--mismatch a b))))
+               (loop for i from 0
+                     for ai across a
+                     for bi across b
+                     for xi = (ert--explain-equal-rec ai bi)
+                     do (when xi (return `(array-elt ,i ,xi)))
+                     finally (assert (equal a b) t))))
+      (atom (if (and (not (equal a b))
+                     (not (and (symbolp a) (symbolp b) (string= a b))))
+                `(different-atoms ,(ert--explain-format-atom a)
+                                  ,(ert--explain-format-atom b))
+              nil)))))
 (put 'i/test-equals-ignore-gensym
      'ert-explainer 'i/test-explainer-equal)
 
@@ -230,3 +168,72 @@ by `i-gensym' to pass)."
        (while (<= i --0)
          (message "i: %s" i)
          (incf i)) nil))))
+
+(ert-deftest i-test-for-across-symbol ()
+  "Tests the expansion of i-iterate macro, (for * across **) driver."
+  (require 'i-iterate)
+  (should
+   (i/test-equals-ignore-gensym
+    (macroexpand '(i-iterate (for i across [1 2 3 4]) (message "i: %d" i)))
+    '(let* ((--0 [1 2 3 4]) (--1 0) i)
+       (while (< --1 (length --0))
+         (setq i (aref --0 --1))
+         (incf --1)
+         (message "i: %d" i)) nil))))
+
+(ert-deftest i-test-for-across-list ()
+  "Tests the expansion of i-iterate macro, (for (*) across **) driver."
+  (require 'i-iterate)
+  (let ((test-array [[[1 2 3 4] [5 5 5 5] [1 2 3 4]]
+                     [[4 4 4 4] [1 2 3 4] [1 2 3 4]]
+                     [[1 2 3 4] [a b c d] [1 2 3 4]]
+                     [[1 2 3 4] [1 2 3 4] [i ii iii iv]]]))
+    (should
+     (i/test-equals-ignore-gensym
+      (macroexpand
+       '(++ (for (i j k) across test-array)
+          (message "i: %s, j: %s, k: %s" i j k)
+          (collect (list i j k))))
+      '(let* (--5 (--0 test-array)
+                  (--1 0) k j i)
+         (while (< --1 (length --0))
+           (setq i (aref --0 --1))
+           (incf --1)
+           (let ((--2 0))
+             (while (< --2 (length i))
+               (setq j (aref i --2))
+               (incf --2)
+               (let ((--3 0))
+                 (while (< --3 (length j))
+                   (setq k (aref j --3))
+                   (incf --3)
+                   (setq --5 (cons (list i j k) --5))
+                   (message "i: %s, j: %s, k: %s" i j k))))))
+         (nreverse --5))))))
+
+(ert-deftest i-test-for-pairs ()
+  "Tests the expansion of i-iterate macro, (for (*) pairs **) driver."
+  (require 'i-iterate)
+  (let ((test-hash (make-hash-table)))
+    (dotimes (i 200)
+      (puthash i (- i) test-hash))
+    (should
+     (i/test-equals-ignore-gensym
+      (macroexpand
+       '(++ 
+          (for (a b) pairs test-hash limit 100)
+          (collect (cons a b))
+          (message "a: %s, b: %s" a b)))
+      '(let* ((--0 0) a b --2)
+         (catch (quote --1)
+           (maphash
+            (lambda (k v)
+              (when (or (> --0 100))
+                (throw (quote --1) nil))
+              (setq a k b v)
+              (setq --2 (cons (cons a b) --2))
+              (message "a: %s, b: %s" a b))
+            test-hash))
+         (nreverse --2))))))
+
+;;; i-test.el ends here.
