@@ -164,6 +164,11 @@ expression in expansion of `i-iterate' macro")
   "Signalled when the expression is not recognized by the parser 
 of `i-iterate'")
 
+(i-deferror i-ambigous-reference "Cannot unambigously resolve `%s' variable"
+  "Signalled when a variable could reference two different objects in the
+same scope, and the parser could not decide which object is meant by user 
+of `i-iterate' macro")
+
 (defclass i-driver ()
   ((variables
     :initarg :variables
@@ -413,6 +418,9 @@ HANDLER is the body of the generated function."
             (progn                        ; Multiple hash-tables
               (oset spec hash-drivers (cons driver hdrivers))
               (let* ((accumulator (i-gensym spec))
+                     ;; TODO: Check if we can override `table-var'
+                     (t-var (if (symbolp table-var)
+                                table-var (car table-var)))
                      (keys-list
                       `((,(i-gensym spec)
                          (let (,accumulator)
@@ -424,7 +432,7 @@ HANDLER is the body of the generated function."
                             ;; however, very often they are (unless you
                             ;; delete and instert intecheangeably), so we'll
                             ;; do a bit extra work here.
-                            ,(car table-var)) (nreverse ,accumulator))))))
+                            ,t-var) (nreverse ,accumulator))))))
                 (oset driver variables
                       (append keys-list (oref driver variables)))
                 (oset driver actions
@@ -434,14 +442,12 @@ HANDLER is the body of the generated function."
                          ((and key-var value-var)
                           `(setq ,key-var (car ,(caar keys-list))
                                  ,value-var
-                                 (gethash (car ,(caar keys-list))
-                                          ,(car table-var))))
+                                 (gethash (car ,(caar keys-list)) ,t-var)))
                          (key-var
                           `(setq ,key-var (car ,(caar keys-list))))
                          (value-var
                           `(setq ,value-var
-                                 (gethash (car ,(caar keys-list))
-                                          ,(car table-var)))))
+                                 (gethash (car ,(caar keys-list)) ,t-var))))
                         `(,(caar keys-list) (cdr ,(caar keys-list))))))
                 ;; Whoops... don't know what to do here, need to analyze
                 ;; previous limit condition and perhaps change it or ignore
@@ -515,7 +521,7 @@ HANDLER is the body of the generated function."
 (i-add-for-handler across (spec driver exp)
   (destructuring-bind (var verb iterated-array &optional how iterator)
       exp
-    (let* ((i-array (i-gensym spec))
+    (let* ((i-array (if (i-has-variable-p spec var) var (i-gensym spec)))
            (i-pos (i-gensym spec))
            iter-sym
            (i-iterator
@@ -536,8 +542,20 @@ HANDLER is the body of the generated function."
                               (oref driver variables)))
                   (setq it (cdr it))) iter-sym)))))
       (oset driver variables
-            (append (if (symbolp var) (list var) var)
-                    `((,i-pos 0) (,i-array ,iterated-array))
+            (append (unless (eql i-array var)
+                      (if (symbolp var) (list var) var))
+                    `((,i-pos 0))
+                    ;; If `iterated-array' was already declared,
+                    ;; we need to re-use it.
+                    (if (i-has-variable-p spec iterated-array)
+                        (progn
+                          ;; If this was a reference to already
+                          ;; existing variable, we cannot redefine it
+                          ;; the users' program is at fault
+                          (when (eql var i-array)
+                            (signal 'i-ambigous-reference var))
+                          (setq i-array iterated-array) nil)
+                      `((,i-array ,iterated-array)))
                     (oref driver variables)))
       (if (symbolp var)
           (oset driver actions
@@ -694,6 +712,13 @@ HANDLER is the body of the generated function."
   (with-slots (drivers) spec
     (setq drivers (remove driver drivers))))
 
+(defmethod i-has-variable-p ((spec i-spec) variable)
+  (some (lambda (x)
+          (if (consp x) 
+              (eql variable (car x))
+            (eql variable x))) 
+        (i-aggregate-property spec 'variables #'append)))  
+
 (defun i--parse-repeat (exp spec)
   (let ((sym (i-gensym spec)))
     (with-slots (drivers) spec
@@ -730,6 +755,8 @@ HANDLER is the body of the generated function."
         (oset spec drivers (cons driver (oref spec drivers)))
         (when nestedp `(setq ,location (cons ,form ,location)))))))
 
+;; TODO: We can check whether the variables declared here are used
+;; in other clauses, and re-use them instead of creating extra variables.
 (defun i--parse-with (vars spec)
   "Appends variable declarations in VARS to SPEC, an instance of `i-spec'
 VARS can be a symbol or a list"

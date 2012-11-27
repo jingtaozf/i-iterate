@@ -236,4 +236,64 @@ This is, basically, only slightly altered `ert--explain-equal'"
             test-hash))
          (nreverse --2))))))
 
+(ert-deftest i-test-for-pairs-pairs ()
+  "Tests the expansion of i-iterate macro, (for (*) pairs **) driver
+when used in combination with more pairs."
+  (require 'i-iterate)
+  (let ((test-hash (make-hash-table)))
+    (dotimes (i 200)
+      (puthash i (- i) test-hash))
+    (should
+     (i/test-equals-ignore-gensym
+      (macroexpand
+       '(++ 
+          (for (a b) pairs test-hash limit 100)
+          (for (c d) pairs test-hash limit 120)
+          (collect (list (cons a b) (cons c d)))
+          (message "a: %s, b: %s, c: %s, d: %s" a b c d)))
+      '(let* (d c (--3 (let (--2)
+                         (maphash
+                          (lambda (k v)
+                            (setq --2 (cons k --2)))
+                          test-hash)
+                         (nreverse --2)))
+                (--4 0) b a (--0 0) --5)
+         (catch (quote --1)
+           (maphash
+            (lambda (k v)
+              (when (or (> --4 120) (> --0 100))
+                (throw (quote --1) nil))
+              (setq a k b v)
+              (setq c (car --3) d (gethash (car --3) test-hash) --3 (cdr --3))
+              (incf --4)
+              (setq --5 (cons (list (cons a b) (cons c d)) --5))
+              (message "a: %s, b: %s, c: %s, d: %s" a b c d))
+            test-hash))
+         (nreverse --5))))))
+
+(ert-deftest i-test-for-pairs-pairs ()
+  "Tests the expansion of i-iterate macro, (for (*) pairs **) driver
+when used in combination with more pairs."
+  (require 'i-iterate)
+  (should
+   (i/test-equals-ignore-gensym
+    (macroexpand
+     '(++
+        (with ((a (let ((x 0)) 
+                    (map 'vector #'(lambda (y) (+ y (incf x)))
+                         (make-vector 10 0))))
+               (b 100) c))
+        (for i across a)
+        (message "b - i: %s, c: %s" (- b i) c)))
+    '(let* ((--1 0)
+            i c (b 100)
+            (a (let ((x 0))
+                 (map (quote vector)
+                      (function (lambda (y) (+ y (incf x))))
+                      (make-vector 10 0)))))
+       (while (< --1 (length a))
+         (setq i (aref a --1))
+         (incf --1)
+         (message "b - i: %s, c: %s" (- b i) c)) nil))))
+
 ;;; i-test.el ends here.
