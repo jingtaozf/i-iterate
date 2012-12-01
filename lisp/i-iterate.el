@@ -1,4 +1,4 @@
-;;; Commentary:
+;; Commentary:
 
 ;; ------------------------------------------------------------------------
 ;; Copyright (C) Oleg Sivokon (olegsivokon@gmail.com)
@@ -342,34 +342,41 @@ HANDLER is the body of the generated function."
            (symbolp (cadr exp)))
       (and (consp exp) (eql (car exp) 'quote))))
 
-(i-add-for-handler (uprform from downfrom) (spec driver exp)
+(i-add-for-handler (uprfrom from downfrom) (spec driver exp)
   (destructuring-bind
       (var verb begin &optional target limit how iterator (op '<=))
       exp
-    ;; TODO: need to check for constant expressions in iterator and limit
-    ;; to possibly avoid generating extra vairables.
-    (oset driver variables `((,var ,begin)))
+    (unless (i-has-variable-p spec var)
+      (oset driver variables `((,var ,begin))))
     (let ((act (if (eql verb 'downfrom) 'decf 'incf))
-          (sym (when how (i-gensym spec))) lh-exp)
+          (sym (when how
+                 (if (i-constexp-p iterator)
+                     iterator
+                   (i-gensym spec))))
+          lh-exp)
       (if sym 
           (progn
-            (oset driver variables
-                  (cons (list sym iterator) (oref driver variables)))
+            (unless (eql sym iterator)
+              (oset driver variables
+                    (cons (list sym iterator) (oref driver variables))))
             (setq lh-exp `(,act ,var ,sym)))
         (setq lh-exp `(,act ,var)))
       (oset driver epilogue `(,lh-exp))
       (setq op
             (cond
-             ((eql target 'to) op)
+             ((eql target 'to) (if (eql verb 'downfrom) '>= op))
              ((eql target 'downto) '>=)
              ((eql target 'below) '<)
              ((eql target 'upto) '>)
              ((null target) nil)
              (t (signal 'i-unknown-verb target))))
       (when op
-        (let ((sym (i-gensym spec)))
-          (oset driver variables
-                (cons (list sym limit) (oref driver variables)))
+        (let ((sym (if (i-constexp-p limit)
+                       limit
+                     (i-gensym spec))))
+          (unless (eql sym limit)
+            (oset driver variables
+                  (cons (list sym limit) (oref driver variables))))
           (oset driver exit-conditions `((,op ,var ,sym))))))))
 
 (i-add-for-handler (keys values pairs) (spec driver exp) i-hash-driver
@@ -606,7 +613,7 @@ HANDLER is the body of the generated function."
       (oset driver exit-conditions
             `((< ,i-pos (length ,i-array)))))))
 
-(i-add-for-handler in (spec driver exp)
+(i-add-for-handler (in on) (spec driver exp)
   (destructuring-bind (var verb iterated-list &optional how iterator)
       exp
     (let ((i-list (i-gensym spec))
@@ -646,30 +653,53 @@ HANDLER is the body of the generated function."
                       name)
                   (oset driver variables
                         (cons `(,var-sym ',var) (oref driver variables)))
+                  (when (eql verb 'on)
+                    (oset driver variables
+                          (cons `(,list-sym ,i-list) (oref driver variables)))
+                    (oset driver exit-conditions (list list-sym)))
                   (while varnames
                     (setq name (car varnames) varnames (cdr varnames))
                     (oset driver variables
                           (cons name (oref driver variables))))
-                  `((let ((,varnames-sym ,var-sym) (,list-sym (car ,i-list)))
-                      (while ,varnames-sym
-                        (set (car ,varnames-sym) (car ,list-sym))
-                        (setq ,varnames-sym (cdr ,varnames-sym)
-                              ,list-sym (cdr ,list-sym)))
-                      (setq ,i-list ,@(list iter-exp))))))
+                  (if (eql verb 'in)
+                      ;; walking over cars
+                      `((let ((,varnames-sym ,var-sym) (,list-sym (car ,i-list)))
+                          (while ,varnames-sym
+                            (set (car ,varnames-sym) (car ,list-sym))
+                            (setq ,varnames-sym (cdr ,varnames-sym)
+                                  ,list-sym (cdr ,list-sym)))
+                          (setq ,i-list ,@(list iter-exp))))
+                    ;; walking over conses
+                    `((let ((,varnames-sym ,var-sym))
+                        (setq ,list-sym ,i-list)
+                        (while ,varnames-sym
+                          (set (car ,varnames-sym) (car ,list-sym))
+                          (setq ,varnames-sym (cdr ,varnames-sym)
+                                ,list-sym (cdr ,list-sym)))
+                        (setq ,i-list ,@(list iter-exp)))))))
                ((consp var)               ; a (key . value) pair
                 (let ((key (car var))
                       (value (cdr var)))
                   (oset driver variables
                         (append (list key) (list value)
                                 (oref driver variables)))
-                  `((setq ,key (caar ,i-list) ,value (cdar ,i-list)
-                          ,i-list ,@(list iter-exp)))))
+                  (if (eql verb 'in)
+                      ;; walking over cars
+                      `((setq ,key (caar ,i-list) ,value (cdar ,i-list)
+                              ,i-list ,@(list iter-exp)))
+                    ;; walking over conses
+                    `((setq ,key (car ,i-list) ,value (cdr ,i-list)
+                            ,i-list ,@(list iter-exp))))))
                (t                           ; just a single variable
                 (oset driver variables
                       (cons var (oref driver variables)))
-                `((setq ,var (car ,i-list)
-                        ,i-list ,@(list iter-exp))))))
-        (oset driver exit-conditions (list i-list))))))
+                (if (eql verb 'in)
+                    ;; cars
+                    `((setq ,var (car ,i-list) ,i-list ,@(list iter-exp)))
+                  ;; conses
+                  `((setq ,var ,i-list ,i-list ,@(list iter-exp)))))))
+        (unless (oref driver exit-conditions)
+          (oset driver exit-conditions (list i-list)))))))
 
 (defmethod i-aggregate-property ((spec i-spec) property &optional extractor)
   (with-slots (drivers) spec
@@ -739,6 +769,7 @@ HANDLER is the body of the generated function."
       (oset spec drivers (cons driver (oref spec drivers))))))
 
 (defun i--parse-collect (exp &optional spec)
+  "Parses the (collect var &optional into place) expression"
   (let ((nestedp (not spec))
         (driver (make-instance 'i-driver))
         (spec (or spec  i-spec-stack))
@@ -748,12 +779,36 @@ HANDLER is the body of the generated function."
         exp
       (let ((location (or location (i-gensym spec))))
         (oset driver variables `(,location))
+        ;; There's soemthing weird here with unless/when
+        ;; maybe it could be an if?
         (unless nestedp
           (oset driver actions
                 `((setq ,location (cons ,form ,location)))))
         (oset spec result `(nreverse ,location))
         (oset spec drivers (cons driver (oref spec drivers)))
         (when nestedp `(setq ,location (cons ,form ,location)))))))
+
+(defun i--parse-hash (exp &optional spec)
+  "Parses the (hash key &optional value into into table) expression.
+Note: it is possible to declare a hash-table here, so that all the declaration
+options will hold for the result."
+  (let ((nestedp (not spec))
+        (driver (make-instance 'i-driver))
+        (spec (or spec  i-spec-stack))
+        ;; This looks wrong, we've lost something underway
+        (exp (if (consp exp) exp (list exp))))
+    (destructuring-bind (key &optional value into table test)
+        exp
+      (let ((table-sym (or table (i-gensym spec)))
+            (val-sym (or value (i-gensym spec))))
+        (oset driver variables
+              (if (eql table-sym table)
+                  `(,table-sym)
+                `((,table-sym (make-hash-table)))))
+        (oset spec result table-sym)
+        (oset spec drivers (cons driver (oref spec drivers)))
+        (oset driver actions
+              `((puthash ,key ,val-sym ,table-sym)))))))
 
 ;; TODO: We can check whether the variables declared here are used
 ;; in other clauses, and re-use them instead of creating extra variables.
@@ -782,6 +837,8 @@ VARS can be a symbol or a list"
      (i--parse-for (i--expand-in-environment rest) spec))
     (`(collect . ,rest)
      (i--parse-collect (i--expand-in-environment rest) spec))
+    (`(hash . ,rest)
+     (i--parse-hash (i--expand-in-environment rest) spec))
     (`(with . ,rest)
      (i--parse-with (i--expand-in-environment rest) spec))
     (_ (with-slots (body) spec

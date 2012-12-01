@@ -164,8 +164,8 @@ This is, basically, only slightly altered `ert--explain-equal'"
   (should
    (i/test-equals-ignore-gensym
     (macroexpand '(++ (for i from 0 to 10) (message "i: %s" i)))
-    '(let* ((i 0) (--0 10))
-       (while (<= i --0)
+    '(let* ((i 0))
+       (while (<= i 10)
          (message "i: %s" i)
          (incf i)) nil))))
 
@@ -296,4 +296,64 @@ when used in combination with more pairs."
          (incf --1)
          (message "b - i: %s, c: %s" (- b i) c)) nil))))
 
-;;; i-test.el ends here.
+(ert-deftest i-test-for-on-list ()
+  "Tests the expansion of i-iterate macro, (for (*) on **) driver
+when used in combination with more pairs."
+  (require 'i-iterate)
+  (should
+   (i/test-equals-ignore-gensym
+    (macroexpand
+     '(++ (for (a b c) on '(1 2 3 4 5))
+        (message "a: %s, b: %s, c: %s" a b c)))
+    '(let* ((--0 (quote (1 2 3 4 5))) (--3 (quote (a b c))) (--2 --0) a b c)
+       (while --2
+         (let ((--1 --3))
+           (setq --2 --0)
+           (while --1
+             (set (car --1) (car --2))
+             (setq --1 (cdr --1) --2 (cdr --2)))
+           (setq --0 (cdr --0)))
+         (message "a: %s, b: %s, c: %s" a b c)) nil))))
+
+(ert-deftest i-test-for-on-alist ()
+  "Tests the expansion of i-iterate macro, (for (*) on **) driver
+when used in combination with more pairs."
+  (require 'i-iterate)
+  (should
+   (i/test-equals-ignore-gensym
+    (macroexpand '(++ (for (a . b) on '(1 2 3 4 5))
+                    (message "a: %s, b: %s" a b)))
+    '(let* ((--0 (quote (1 2 3 4 5))) b a)
+       (while --0
+         (setq a (car --0) b (cdr --0) --0 (cdr --0))
+         (message "a: %s, b: %s" a b)) nil))))
+
+(ert-deftest i-test-for-on-symbol ()
+  "Tests the expansion of i-iterate macro, (for (*) on **) driver
+when used in combination with more pairs."
+  (require 'i-iterate)
+  (should
+   (i/test-equals-ignore-gensym
+    (macroexpand '(++ (for a on '(1 2 3 4 5))
+                    (message "a: %s" a)))
+    '(let* ((--0 (quote (1 2 3 4 5))) a)
+       (while --0
+         (setq a (car --0) --0 (cdr --0))
+         (message "a: %s" a)) nil))))
+
+(ert-deftest i-test-for-downfrom-hash ()
+  "Tests the expansion of i-iterate macro, (for (*) on **) driver
+when used in combination with more pairs."
+  (require 'i-iterate)
+  (should
+   (i/test-equals-ignore-gensym
+    (macroexpand '(++ (for i downfrom 10 to -10 by 2)
+                    (hash i (* 2 i))
+                    (message "i: %s" i)))
+    '(let* ((--0 (make-hash-table)) (i 10))
+       (while (>= i -10)
+         (puthash i (* 2 i) --0)
+         (message "i: %s" i)
+         (decf i 2)) --0))))
+
+;;; I-test.el ends here.
