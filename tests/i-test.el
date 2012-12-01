@@ -57,7 +57,7 @@ by `i-gensym' to pass)."
 (defun i/test-explainer-equal (a b)
   "Explains why `i/test-equals-ignore-gensym' failed.
 This is, basically, only slightly altered `ert--explain-equal'"
-  (if (not (equal (type-of a) (type-of b)))
+  (if (not (i/test-equals-ignore-gensym (type-of a) (type-of b)))
       `(different-types ,a ,b)
     (etypecase a
       (cons
@@ -66,7 +66,8 @@ This is, basically, only slightly altered `ert--explain-equal'"
          (if (not (eql (not a-proper-p) (not b-proper-p)))
              `(one-list-proper-one-improper ,a ,b)
            (if a-proper-p
-               (if (not (equal (length a) (length b)))
+               (if (not (i/test-equals-ignore-gensym
+                         (length a) (length b)))
                    `(proper-lists-of-different-length
                      ,(length a) ,(length b)
                      ,a ,b
@@ -75,18 +76,18 @@ This is, basically, only slightly altered `ert--explain-equal'"
                  (loop for i from 0
                        for ai in a
                        for bi in b
-                       for xi = (ert--explain-equal-rec ai bi)
+                       for xi = (i/test-explainer-equal ai bi)
                        do (when xi (return `(list-elt ,i ,xi)))
-                       finally (assert (equal a b) t)))
-             (let ((car-x (ert--explain-equal-rec (car a) (car b))))
+                       finally (assert (i/test-equals-ignore-gensym a b) t)))
+             (let ((car-x (i/test-explainer-equal (car a) (car b))))
                (if car-x
                    `(car ,car-x)
-                 (let ((cdr-x (ert--explain-equal-rec (cdr a) (cdr b))))
+                 (let ((cdr-x (i/test-explainer-equal (cdr a) (cdr b))))
                    (if cdr-x
                        `(cdr ,cdr-x)
-                     (assert (equal a b) t)
+                     (assert (i/test-equals-ignore-gensym a b) t)
                      nil))))))))
-      (array (if (not (equal (length a) (length b)))
+      (array (if (not (i/test-equals-ignore-gensym (length a) (length b)))
                  `(arrays-of-different-length
                    ,(length a) ,(length b)
                    ,a ,b
@@ -96,10 +97,10 @@ This is, basically, only slightly altered `ert--explain-equal'"
                (loop for i from 0
                      for ai across a
                      for bi across b
-                     for xi = (ert--explain-equal-rec ai bi)
+                     for xi = (i/test-explainer-equal ai bi)
                      do (when xi (return `(array-elt ,i ,xi)))
-                     finally (assert (equal a b) t))))
-      (atom (if (and (not (equal a b))
+                     finally (assert (i/test-equals-ignore-gensym a b) t))))
+      (atom (if (and (not (i/test-equals-ignore-gensym a b))
                      (not (and (symbolp a) (symbolp b) (string= a b))))
                 `(different-atoms ,(ert--explain-format-atom a)
                                   ,(ert--explain-format-atom b))
@@ -338,7 +339,7 @@ when used in combination with more pairs."
                     (message "a: %s" a)))
     '(let* ((--0 (quote (1 2 3 4 5))) a)
        (while --0
-         (setq a (car --0) --0 (cdr --0))
+         (setq a --0 --0 (cdr --0))
          (message "a: %s" a)) nil))))
 
 (ert-deftest i-test-for-downfrom-hash ()
