@@ -357,4 +357,31 @@ when used in combination with more pairs."
          (message "i: %s" i)
          (decf i 2)) --0))))
 
+(ert-deftest i-test-for-upfrom-to-output ()
+  "Tests the expansion of i-iterate macro,
+ (for * upfrom ** to ***) in combination with
+ (output *) driver."
+  (require 'i-iterate)
+  (should
+   (i/test-equals-ignore-gensym
+    (macroexpand '(++ (for i upfrom 42 to 54)
+                    (output 
+                     (if (oddp i) 
+                         (print (format "odd: %s" i))
+                       (print (format "even: %s" i))) into result)))
+    '(let* ((result (get-buffer-create
+                     (generate-new-buffer-name " *string-output*")))
+            (i 42))
+       (unwind-protect
+           (progn
+             (while (<= i 54)
+               (let ((standard-output result))
+                 (if (oddp i)
+                     (print (format "odd: %s" i))
+                   (print (format "even: %s" i))))
+               (incf i))
+             (with-current-buffer result
+               (buffer-string)))
+         (kill-buffer result))))))
+
 ;;; I-test.el ends here.

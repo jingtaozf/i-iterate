@@ -169,6 +169,10 @@ of `i-iterate'")
 same scope, and the parser could not decide which object is meant by user 
 of `i-iterate' macro")
 
+(i-deferror i-redefine-variable "Redefining a variable `%s'"
+  "Signalled when a the code attempts to define a variable with the name
+that has already been used by some other code generated in `i-iterate' macro")
+
 (defclass i-driver ()
   ((variables
     :initarg :variables
@@ -186,6 +190,13 @@ of `i-iterate' macro")
     :type list
     :documentation "Like actions, but used when this driver already defines
 the placement for other actions")
+   (cleanup-actions
+    :initarg :cleanup-actions
+    :initform nil
+    :type list
+    :documentation "If this is not nil, then the entire loop is wrapped into
+`unwind-protect' and these actions are executed after the loop ends and
+returns the result")
    (epilogue
     :initarg :epilogue
     :initform nil
@@ -214,6 +225,15 @@ in the `i-spec' (some drivers may not need it)."))
           "The variable pointing at hash table of this driver"))
   :documentation
   "This driver is used when generating loops involving hash-tables")
+
+(defclass i-output-driver (i-driver)
+  ((stdout :initarg :stdout
+          :initform nil
+          :type symbol
+          :documentation
+          "The variable bound to a buffer actinc like `standard-output'"))
+  :documentation
+  "This driver is used when generating (output ...) expressions")
 
 (defclass i-spec ()
   ((body
@@ -262,6 +282,12 @@ catch block inside the main loop")
 the body has already been placed inside the first driver. If there are 
 multiple hash drivers, then the code generated for subsequent drivers 
 must be different. ")
+   (output-drivers
+    :initform nil
+    :type list
+    :documentation "The list of `i-output-driver's. If this is not nil, then
+it means that we have already generated the cleanup code necessary for printing
+and we have a variable bound to `standard-output', so no need to create more. ")
    (has-body-insertion-p
     :initform nil
     :type symbol
@@ -296,8 +322,18 @@ if you need to add your own driver")
 Use `i-add-for-handler' if you need to add your own driver")
 (unless i-for-drivers (setq i-for-drivers (make-hash-table)))
 
-(defvar i-expanders '((collect . i--parse-collect))
+(defvar i-expanders '((collect . i--parse-collect)
+                      (hash . i--parse-hash)
+                      (output . i--parse-output))
   "The expanders used in the nested forms in the `i-iterate' macro")
+
+(defvar i-prefix-handlers '((repeat . i--parse-repeat)
+                            (for . i--parse-for)
+                            (collect . i--parse-collect)
+                            (hash . i--parse-hash)
+                            (output . i--parse-output)
+                            (with . i--parse-with))
+  "Top-level handlers used in expansion of `i-iterate' macro")
 
 (defvar i-spec-stack nil
   "This variable is bound by various expanders when they need to receive the
@@ -342,7 +378,7 @@ HANDLER is the body of the generated function."
            (symbolp (cadr exp)))
       (and (consp exp) (eql (car exp) 'quote))))
 
-(i-add-for-handler (uprfrom from downfrom) (spec driver exp)
+(i-add-for-handler (upfrom from downfrom) (spec driver exp)
   (destructuring-bind
       (var verb begin &optional target limit how iterator (op '<=))
       exp
@@ -810,6 +846,107 @@ options will hold for the result."
         (oset driver actions
               `((puthash ,key ,val-sym ,table-sym)))))))
 
+;; TODO: untested
+(defmethod i-variable-has-initializer ((this i-spec) variable)
+  (not (some
+        (lambda (x)
+          (and (consp x)
+               (eql (car x) variable)
+               (cdr x)))
+            (i-aggregate-property this 'variables))))
+
+;; TODO: untested
+(defmethod i-update-variable ((this i-spec) name value)
+  (let ((variables (i-aggregate-property this 'variables))
+        current)
+    (while variables
+      (setq current (car variables) variables (cdr variables))
+      (when (and (consp current) (eql (car current) name))
+          (setcdr current value)
+          (setq variables nil))) name))
+
+(defun i--parse-output (exp &optional spec)
+  "Similar to `with-output-to-string' collects all what is printed in
+the (output * &optional into **) expression. The into argument is the
+variable that is set to the buffer, where printing happens. I.e. this
+will bind `standard-output' to this variable."
+  (let ((nestedp (not spec))
+        (driver (make-instance 'i-output-driver))
+        (spec (or spec  i-spec-stack))
+        ;; This looks wrong, we've lost something underway
+        (exp (if (consp exp) exp (list exp))))
+    ;; FIXME: Before adding `standard-output' to the variables, need
+    ;; to check it can be already there.
+    (destructuring-bind (print-exp &optional into place)
+        exp
+      (let* ((stdout '(get-buffer-create
+                       (generate-new-buffer-name
+                        " *string-output*")))
+             (place                     ; TODO: This is too messy
+                                        ; need to find a better way to
+                                        ; check for stuff in here
+              (let* ((maybe-drivers (oref spec output-drivers))
+                     (maybe-variables
+                      (mapcan (lambda (x) (oref x variables))
+                              maybe-drivers)))
+                (cond
+                 ((and place maybe-drivers)
+                  ;; this is an additional driver, most work has
+                  ;; been done already, just check if we need to
+                  ;; bind `place'
+                  (cond
+                   ;; This is a user error, if this variable existed
+                   ;; has some initial value, but was not one of the
+                   ;; variables bound to `standart-output'.
+                   ((and (i-has-variable-p spec place)
+                         (not (member place maybe-variables))
+                         (i-variable-has-initializer spec place))
+                    (signal 'i-redefine-variable place))
+                   ;; This variable was declared in some place other
+                   ;; then drivers (for example, with `with', but
+                   ;; wasn't initialized, let's initialize it.
+                   ((and (i-has-variable-p spec place)
+                         (not (member place maybe-variables)))
+                    (i-update-variable spec place stdout))
+                   ;; This variable didn't exist before, so create it
+                   (t (oset driver variables `((,place ,stdout)))))
+                  place)
+                 (place
+                  ;; This is the new driver, so create all fresh
+                  (if (i-has-variable-p spec place)
+                      (if (i-variable-has-initializer spec place)
+                          (signal 'i-redefine-variable place)
+                        (i-update-variable spec place stdout))
+                    (oset driver variables `((,place ,stdout)))
+                    (oset driver stdout place)))
+                 (maybe-drivers
+                  ;; We had a driver already, so, probably can
+                  ;; reuse it's `stdout'.
+                  (let ((old-stdout (oref (car maybe-drivers) stdout))
+                        (new-place (i-gensym spec)))
+                    (oset driver variables `((,new-place ,old-stdout)))
+                    (oset driver stdout old-stdout)
+                    new-place))
+                 (t
+                  ;; This is the automatic variable created to
+                  ;; be able to bind and unbind `standard-output'
+                  ;; while we carry out the printing.
+                  (let ((new-place (i-gensym spec)))
+                    (oset driver variables `((,new-place ,stdout)))
+                    (oset driver stdout new-place)
+                    new-place))))))
+        (oset spec result `(with-current-buffer ,place
+                             (buffer-string)))
+        (oset spec drivers (cons driver (oref spec drivers)))
+        (oset driver cleanup-actions `((kill-buffer ,place)))
+        ;; This can be further optimized by noting how many printing
+        ;; drivers there are, if we have only one, we can bind
+        ;; `standart-output' as early as the topmost `let' and avoid
+        ;; this let.
+        (oset driver actions
+              `((let ((standard-output ,place))
+                 ,@(i--expand-in-environment print-exp))))))))
+
 ;; TODO: We can check whether the variables declared here are used
 ;; in other clauses, and re-use them instead of creating extra variables.
 (defun i--parse-with (vars spec)
@@ -822,28 +959,23 @@ VARS can be a symbol or a list"
 (defun i--expand-in-environment (exp &optional env)
   (let ((env (or env macroexpand-all-environment)))
     (macrolet
-        ((collect (e)))
+        ((collect (e))
+         (hash (e))
+         (output (e)))
       (let ((e i-expanders))
         (while e
           (add-to-list 'env (car e))
           (setq e (cdr e))))
-      (macroexpand-all exp env))))
+      (macroexpand-all (list exp) env))))
 
 (defun i--parse-exp (exp spec)
-  (pcase exp
-    (`(repeat . ,rest)
-     (i--parse-repeat (i--expand-in-environment rest) spec))
-    (`(for . ,rest)
-     (i--parse-for (i--expand-in-environment rest) spec))
-    (`(collect . ,rest)
-     (i--parse-collect (i--expand-in-environment rest) spec))
-    (`(hash . ,rest)
-     (i--parse-hash (i--expand-in-environment rest) spec))
-    (`(with . ,rest)
-     (i--parse-with (i--expand-in-environment rest) spec))
-    (_ (with-slots (body) spec
+  (let ((handler (cdr (assoc (car exp) i-prefix-handlers))))
+    (if handler
+        (funcall handler
+                 (car (i--expand-in-environment (cdr exp))) spec)
+      (with-slots (body) spec
          (let ((i-spec-stack spec))
-           (push (i--expand-in-environment exp) body))))))
+           (push (car (i--expand-in-environment exp)) body))))))
 
 (defun i--parse-specs (specs)
   "Parses SPECS and creates an AST represented in an instance of
@@ -904,6 +1036,20 @@ REPLACEMENTS."
       (setq exp (i--replace-non-nil exp (car s) (car r))
             s (cdr s) r (cdr r))) exp))
 
+(defun i--place-unwind-form (exp replacement)
+  (cond
+   ((null exp) nil)
+   ((and (consp exp) (consp (car exp))
+         (eql (caar exp) '--i-unwind-form))
+    (let ((content (cdar exp)))
+      (if replacement
+        `((unwind-protect (progn ,@content) ,@replacement))
+        content)))
+   ((consp exp)
+    (cons (i--place-unwind-form (car exp) replacement)
+          (i--place-unwind-form (cdr exp) replacement)))
+   (t exp)))
+
 ;;;###autoload
 (defmacro i-iterate (&rest specs)
   ;; TODO: see `(elisp) Indenting Macros' for better indenting.
@@ -914,7 +1060,8 @@ REPLACEMENTS."
                       has-epilogue-insertion-p init-form
                       break-condition continue-condition) spec
       (i-with-aggregated
-       (exit-conditions variables actions special-actions epilogue) spec
+       (exit-conditions variables actions special-actions
+                        epilogue cleanup-actions) spec
        (let* ((econds
                (cond
                 ((cdr exit-conditions)
@@ -967,16 +1114,22 @@ REPLACEMENTS."
                      (maphash ,(car (reverse hactions)) ,htable)))))))
          (i--remove-surplus-progn
           (i--replace-non-nil-multi
-           (cond
-            ((and break-condition vars)
-             `(progn
-                (let* (,@vars) (catch ',break-condition ,@mandatory-block)
-                      ,result)))
-            (break-condition
-             `(progn
-                (catch ',break-condition (,@mandatory-block)) ,result))
-            (variables `(let* (,@vars) ,@mandatory-block ,result))
-            (t `(progn ,@mandatory-block ,result)))
+           (i--place-unwind-form
+            (cond
+             ((and break-condition vars)
+              `(progn
+                 (let* (,@vars)
+                   (--i-unwind-form
+                    (catch ',break-condition ,@mandatory-block)
+                    ,result))))
+             (break-condition
+              `(progn
+                 (--i-unwind-form
+                  (catch ',break-condition (,@mandatory-block)) ,result)))
+             (variables
+              `(let* (,@vars) (--i-unwind-form ,@mandatory-block ,result)))
+             (t `(progn (--i-unwind-form ,@mandatory-block ,result))))
+            cleanup-actions)
            '(--i-special-actions-form
              --i-actions-form
              --i-body-form
