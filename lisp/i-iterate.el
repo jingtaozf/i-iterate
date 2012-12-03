@@ -737,7 +737,57 @@ HANDLER is the body of the generated function."
         (unless (oref driver exit-conditions)
           (oset driver exit-conditions (list i-list)))))))
 
+(i-add-for-handler (chars words lines) (spec driver exp)
+  (destructuring-bind (var verb &optional in buffer)
+      exp
+    (let (buf-var action-exp)
+      (cond
+       ;; `buffer' refers to some previously defined variable
+       ((and buffer (i-has-variable-p spec buffer))
+        (when (i-variable-has-initializer buffer)
+          (signal 'i-redefine-variable buffer))
+        (setq buf-var buffer))
+       ;; `buffer' is a primitive, such as string or symbol
+       ;; bound to that buffer, don't create a variable, use as is.
+       ((i-constexp-p buffer)
+        (setq buf-var buffer))
+       ;; `buffer' is an expression we need to evaluate and create
+       ;; a variable for it
+       (buffer
+        (setq buf-var (i-gensym spec))
+        (oset driver variables `((,buf-var ,buffer))))
+       ;; else means to use the current buffer
+       )
+      (unless (i-has-variable-p spec var)
+        (oset driver variables (cons var (oref driver variables))))
+      (setq action-exp
+            (cond
+             ((eql verb 'chars)
+              `(progn
+                 (setq ,var (char-after))
+                 (forward-char)))
+             ((eql verb 'words)
+              `(setq ,var
+                     (buffer-substring
+                      (point)
+                      (progn (forward-word) (point)))))
+             (t
+              `(setq ,var
+                     (buffer-substring
+                      (point)
+                      (progn (forward-line) (point)))))))
+      (oset driver exit-conditions
+            (if buf-var
+                `((with-current-buffer ,buf-var (not (eobp))))
+              `((not (eobp)))))
+      (oset driver actions
+            (if buf-var
+                `((with-current-buffer ,buf-var ,action-exp))
+              `(,action-exp))))))
+
 (defmethod i-aggregate-property ((spec i-spec) property &optional extractor)
+  "Imitates virtual slots (not allocated, but when accessed, collects values
+from inner objects (drivers) and returns an aggregated result."   
   (with-slots (drivers) spec
     (let ((ds drivers) result)
       (while ds
@@ -748,6 +798,8 @@ HANDLER is the body of the generated function."
         (setq ds (cdr ds))) result)))
 
 (defmacro i-with-aggregated (properties spec &rest body)
+  "Similar to `with-slots' macro, but doesn't allow setting slots (they aren't
+settable anyway)."
   (let ((s (gensym)))
     `(let* ((,s ,spec)
             ,@(let ((p (reverse properties)) extractor pname result)
@@ -764,16 +816,21 @@ HANDLER is the body of the generated function."
        ,@body)))
 
 (defmethod i-gensym ((spec i-spec))
+  "Like `gensym', but the tokens are ony unique for a single macro
+invocation (this makes it easier to test, since tokens are always
+generated with the same name."
   (with-slots (gen-index) spec
     (incf gen-index)
     (make-symbol (concat "--" (number-to-string (1- gen-index))))))
 
+;; TODO: looks unused
 (defmethod i-add-driver ((spec i-spec) driver)
   (with-slots (drivers) spec
     ;; Cannot use add-to-list here
     (unless (member driver drivers)
       (push driver drivers))))
 
+;; TODO: looks unused
 (defmethod i-remove-driver ((spec i-spec) driver)
   (with-slots (drivers) spec
     (setq drivers (remove driver drivers))))
@@ -784,6 +841,25 @@ HANDLER is the body of the generated function."
               (eql variable (car x))
             (eql variable x))) 
         (i-aggregate-property spec 'variables #'append)))  
+
+;; TODO: untested
+(defmethod i-variable-has-initializer ((this i-spec) variable)
+  (not (some
+        (lambda (x)
+          (and (consp x)
+               (eql (car x) variable)
+               (cdr x)))
+            (i-aggregate-property this 'variables))))
+
+;; TODO: untested
+(defmethod i-update-variable ((this i-spec) name value)
+  (let ((variables (i-aggregate-property this 'variables))
+        current)
+    (while variables
+      (setq current (car variables) variables (cdr variables))
+      (when (and (consp current) (eql (car current) name))
+          (setcdr current value)
+          (setq variables nil))) name))
 
 (defun i--parse-repeat (exp spec)
   (let ((sym (i-gensym spec)))
@@ -845,25 +921,6 @@ options will hold for the result."
         (oset spec drivers (cons driver (oref spec drivers)))
         (oset driver actions
               `((puthash ,key ,val-sym ,table-sym)))))))
-
-;; TODO: untested
-(defmethod i-variable-has-initializer ((this i-spec) variable)
-  (not (some
-        (lambda (x)
-          (and (consp x)
-               (eql (car x) variable)
-               (cdr x)))
-            (i-aggregate-property this 'variables))))
-
-;; TODO: untested
-(defmethod i-update-variable ((this i-spec) name value)
-  (let ((variables (i-aggregate-property this 'variables))
-        current)
-    (while variables
-      (setq current (car variables) variables (cdr variables))
-      (when (and (consp current) (eql (car current) name))
-          (setcdr current value)
-          (setq variables nil))) name))
 
 ;; void permute(int *array,int i,int length) { 
 ;;   if (length == i){

@@ -384,4 +384,17 @@ when used in combination with more pairs."
                (buffer-string)))
          (kill-buffer result))))))
 
+(ert-deftest i-test-for-words-in ()
+  "Tests the expansion of (for * words in **) i-iterate macro."
+  (require 'i-iterate)
+  (should
+   (i/test-equals-ignore-gensym
+    (macroexpand '(++ (for i words in "i-iterate.el")
+                    (message "i: %s" i)))
+    '(let* (i)
+       (while (with-current-buffer "i-iterate.el" (not (eobp)))
+         (with-current-buffer "i-iterate.el"
+           (setq i (buffer-substring (point) (progn (forward-word) (point)))))
+         (message "i: %s" i)) nil))))
+
 ;;; I-test.el ends here.
