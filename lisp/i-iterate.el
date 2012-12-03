@@ -24,7 +24,7 @@
 
 ;;; Versions:
 ;;
-;;    0.0.0 - This is not usable yet.
+;;    0.0.1 - This packages is in early beta version
 ;;
 
 ;;; Usage:
@@ -864,6 +864,34 @@ options will hold for the result."
       (when (and (consp current) (eql (car current) name))
           (setcdr current value)
           (setq variables nil))) name))
+
+;; void permute(int *array,int i,int length) { 
+;;   if (length == i){
+;;      printArray(array,length);
+;;      return;
+;;   }
+;;   int j = i;
+;;   for (j = i; j < length; j++) { 
+;;      swap(array+i,array+j);
+;;      permute(array,i+1,length);
+;;      swap(array+i,array+j);
+;;   }
+;;   return;
+;; }
+(defsubst i-swap (array a b)
+  (let ((c (aref array a)))
+    (aset array a (aref array b))
+    (aset array b c) array))
+
+(defun i-permute (array offest length)
+  (if (= offest length)
+      (message "array: %s" array)
+    (let ((i offest))
+    (while (< i length)
+      (i-permute (i-swap array i offest) (1+ offest) length)
+      (i-swap array i offest)
+      (incf i)))))
+    
 
 (defun i--parse-output (exp &optional spec)
   "Similar to `with-output-to-string' collects all what is printed in

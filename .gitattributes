@@ -1,5 +1,6 @@
 * text=auto !eol
 /Makefile -text
 /README -text
+/i-pkg.el -text
 lisp/i-iterate.el -text
 tests/i-test.el -text
