@@ -785,6 +785,141 @@ HANDLER is the body of the generated function."
                 `((with-current-buffer ,buf-var ,action-exp))
               `(,action-exp))))))
 
+(defun i--generate-johnson-trotter (array array-form spec driver)
+  "Generates code for creating permutations by consequently
+swapping two adjacent elements. This code is less efficient
+then quickperm, but it has an advantage of less branching
+and it is easier to combine several permutation generators
+at once.
+The original algorithm can be found here:
+<http://en.wikipedia.org/wiki/
+Steinhaus%E2%80%93Johnson%E2%80%93Trotter_algorithm>"
+  (let* ((var (unless (i-has-variable-p spec array) array))
+         (array-value
+          (when array-form
+            (if (and (eq var array)
+                     (i-variable-has-initializer spec var))
+                (signal 'i-redefine-variable var)
+              array-form)))             ; Otherwise it could
+                                        ; be a symbol bound
+                                        ; outside the macro
+         (swap-temp (i-gensym spec))
+         (i (i-gensym spec))
+         (largest (i-gensym spec))
+         (largest-pos (i-gensym spec))
+         (largest-sign (i-gensym spec))
+         (swap-to (i-gensym spec))
+         (markers (i-gensym spec))
+         (len (i-gensym spec)))
+    ;; NOTE: when generating several parallel permutations,
+    ;; it is possible to reuse some of the variables above
+    ;; (because they must be set during each iteration for
+    ;; each of the arrays being permuted, certainly `swap-to'
+    ;; `swap-temp', `i' and `largest' but maybe also
+    ;; `largest-pos' and `largest-sign'.
+    (oset driver variables
+          `((,i 0)
+            (,markers
+             (let ((i 0) (m (make-vector ,len nil)))
+               (while (< i ,len)
+                 (aset m i (cons '1- i))
+                 (incf i))
+               (setcar (aref m 0) nil) m))
+            ,swap-temp ,largest ,largest-pos
+            ,largest-sign ,swap-to
+            (,len (length ,array))
+            ,@(when var
+                (list
+                 (append (list var)
+                         (when array-value
+                           (list array-value)))))))
+    (oset driver exit-conditions `((some #'car ,markers)))
+    (oset driver actions
+          `((setq ,i 0 ,largest nil)
+            (while (< ,i ,len)
+              (destructuring-bind (tested-sign . tested-value)
+                  (aref ,markers ,i)
+                (when (and tested-sign
+                           (or (not ,largest)
+                               (< ,largest tested-value)))
+                  (setq ,largest tested-value ,largest-pos ,i
+                        ,largest-sign tested-sign)))
+              (incf ,i))
+            (when ,largest
+              (setq ,swap-to (funcall ,largest-sign ,largest-pos))
+              (setq ,swap-temp (aref ,array ,largest-pos))
+              (aset ,array ,largest-pos (aref ,array ,swap-to))
+              (aset ,array ,swap-to ,swap-temp)
+              (setq ,swap-temp (aref ,markers ,largest-pos))
+              (aset ,markers ,largest-pos (aref ,markers ,swap-to))
+              (aset ,markers ,swap-to ,swap-temp)
+              (when (or (= ,swap-to 0) (= ,swap-to (1- ,len))
+                        (> (cdr
+                            (aref ,markers
+                                  (funcall ,largest-sign ,swap-to)))
+                           ,largest))
+                (setcar (aref ,markers ,swap-to) nil))
+              (setq ,i 0)
+              (while (< ,i ,len)
+                (setq ,swap-to (cdr (aref ,markers ,i)))
+                (when (> ,swap-to ,largest)
+                  (setcar (aref ,markers ,i)
+                          (if (< ,i ,largest-pos) '1+ '1-)))
+                (incf ,i))
+              --i-body-form)))))
+
+(defun i--generate-quickperm (array array-form spec driver)
+  "Generates code that creates permutations by swapping two
+elements at a time, the code uses algorithm found here:
+<http://www.quickperm.org/>"
+  (let* ((var (unless (i-has-variable-p spec array) array))
+         (array-value
+          (when array-form
+            (if (and (eq var array)
+                     (i-variable-has-initializer spec var))
+                (signal 'i-redefine-variable var)
+              array-form)))             ; Otherwise it could
+                                        ; be a symbol bound
+                                        ; outside the macro
+          
+        (swap-temp (i-gensym spec))
+        (i (i-gensym spec))
+        (j (i-gensym spec))
+        (markers (i-gensym spec))
+        (len (i-gensym spec)))
+    (oset driver variables
+          `(,j (,i 1) (,markers (make-vector ,len 0))
+               ,swap-temp (,len (length ,array))
+               ,@(when var
+                   (list
+                    (append (list var)
+                            (when array-value
+                              (list array-value)))))))
+    (oset driver exit-conditions `((< ,i ,len)))
+    (oset driver actions
+          `((if (< (aref ,markers ,i) ,i)
+                (progn
+                  (setq ,j (if (oddp ,i) (aref ,markers ,i) 0)
+                        ,swap-temp (aref ,array ,j))
+                  (aset ,array ,j (aref ,array ,i))
+                  (aset ,array ,i ,swap-temp)
+                  --i-body-form
+                  (aset ,markers ,i (1+ (aref ,markers ,i)))
+                  (setq ,i 1))
+              (aset ,markers ,i 0)
+              (incf ,i))))))
+
+(i-add-for-handler permutations (spec driver exp)
+  (destructuring-bind (var verb &optional array-form algo what-algo)
+      exp
+    ;; FIXME: Need a plan for what to do when we already have a body
+    ;; insertion point. We don't do quickperm in exactly the number
+    ;; of iteration as many perumatations we generate.
+    (oset spec has-body-insertion-p t)
+    (if (or (null what-algo) (eql what-algo 'quickperm))
+        (i--generate-quickperm var array-form spec driver)
+      (i--generate-johnson-trotter var array-form spec driver))))
+
 (defmethod i-aggregate-property ((spec i-spec) property &optional extractor)
   "Imitates virtual slots (not allocated, but when accessed, collects values
 from inner objects (drivers) and returns an aggregated result."   
@@ -842,14 +977,14 @@ generated with the same name."
             (eql variable x))) 
         (i-aggregate-property spec 'variables #'append)))  
 
-;; TODO: untested
+;; TODO: somewhat tested
 (defmethod i-variable-has-initializer ((this i-spec) variable)
-  (not (some
-        (lambda (x)
-          (and (consp x)
-               (eql (car x) variable)
-               (cdr x)))
-            (i-aggregate-property this 'variables))))
+  (let ((variables (i-aggregate-property this 'variables))
+        current)
+    (catch 't
+      (while variables
+        (setq current (car variables) variables (cdr variables))
+        (when (consp current) (throw 't t))) nil)))
 
 ;; TODO: untested
 (defmethod i-update-variable ((this i-spec) name value)
@@ -921,34 +1056,6 @@ options will hold for the result."
         (oset spec drivers (cons driver (oref spec drivers)))
         (oset driver actions
               `((puthash ,key ,val-sym ,table-sym)))))))
-
-;; void permute(int *array,int i,int length) { 
-;;   if (length == i){
-;;      printArray(array,length);
-;;      return;
-;;   }
-;;   int j = i;
-;;   for (j = i; j < length; j++) { 
-;;      swap(array+i,array+j);
-;;      permute(array,i+1,length);
-;;      swap(array+i,array+j);
-;;   }
-;;   return;
-;; }
-(defsubst i-swap (array a b)
-  (let ((c (aref array a)))
-    (aset array a (aref array b))
-    (aset array b c) array))
-
-(defun i-permute (array offest length)
-  (if (= offest length)
-      (message "array: %s" array)
-    (let ((i offest))
-    (while (< i length)
-      (i-permute (i-swap array i offest) (1+ offest) length)
-      (i-swap array i offest)
-      (incf i)))))
-    
 
 (defun i--parse-output (exp &optional spec)
   "Similar to `with-output-to-string' collects all what is printed in
@@ -1042,6 +1149,9 @@ VARS can be a symbol or a list"
     (oset spec drivers (cons driver (oref spec drivers)))))
 
 (defun i--expand-in-environment (exp &optional env)
+  "A helper function used during macroexpansion of any expression inside
+`i-iterate' macro, it forwards further expansion based on the prefix
+described in `i-expanders'"
   (let ((env (or env macroexpand-all-environment)))
     (macrolet
         ((collect (e))
@@ -1054,6 +1164,8 @@ VARS can be a symbol or a list"
       (macroexpand-all (list exp) env))))
 
 (defun i--parse-exp (exp spec)
+  "Dispatches on the prefix of EXP, finds a proper handler in
+`i-prefix-handlers' and invokes it with the rest of the EXP"
   (let ((handler (cdr (assoc (car exp) i-prefix-handlers))))
     (if handler
         (funcall handler
@@ -1071,6 +1183,14 @@ VARS can be a symbol or a list"
       (i--parse-exp (car s) i)
       (setq s (cdr s))) i))
 
+;; TODO: It is possible to come up with a function that will verify
+;; that a macro which is used for the purpose of performing an action
+;; in a buffer is used recursively e.g. (with-current-buffer x (... (
+;; (with-current-buffer x ... )))) in which case we need to remove
+;; the inner one. Another case is when the same buffer is re-entered
+;; repeatedly, while the rest of the code is executed in an environment
+;; that doesn't depend on a buffer (this later one seems fishy though
+;; but might worth a try)
 (defun i--remove-surplus-progn (exp)
   "Some macros will generate (prong (form)) calls because it is 
 easy to generate it this way, but we can remove them all when 

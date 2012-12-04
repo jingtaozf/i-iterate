@@ -13,7 +13,7 @@ $(DOCDST)/%.info: $(DOCSRC)/%.texi
 	$(IC) $(ICO) -o $@ $<
 
 default: prepare byte-compile $(INFO)
-	cp -r lisp info Makefile README ${PACKAGE}
+	cp -r lisp info Makefile README i-pkg.el ${PACKAGE}
 
 prepare:
 	mkdir -p ${PACKAGE}

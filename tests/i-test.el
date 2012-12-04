@@ -109,7 +109,7 @@ This is, basically, only slightly altered `ert--explain-equal'"
      'ert-explainer 'i/test-explainer-equal)
 
 (ert-deftest i-test-repeat ()
-  "Tests the expansion of i-iterate macro, (repeat *) driver."
+  "Tests the expansion of `i-iterate' macro, (repeat *) driver."
   (require 'i-iterate)
   (should
    (i/test-equals-ignore-gensym
@@ -120,7 +120,7 @@ This is, basically, only slightly altered `ert--explain-equal'"
          (message "")) nil))))
 
 (ert-deftest i-test-for-in-list ()
-  "Tests the expansion of i-iterate macro, (for (*) in **) driver."
+  "Tests the expansion of `i-iterate' macro, (for (*) in **) driver."
   (require 'i-iterate)
   (should
    (i/test-equals-ignore-gensym
@@ -137,7 +137,7 @@ This is, basically, only slightly altered `ert--explain-equal'"
          (message "a: %s, b: %s" a b)) nil))))
 
 (ert-deftest i-test-for-in-symbol ()
-  "Tests the expansion of i-iterate macro, (for * in **) driver."
+  "Tests the expansion of `i-iterate' macro, (for * in **) driver."
   (require 'i-iterate)
   (should
    (i/test-equals-ignore-gensym
@@ -148,7 +148,7 @@ This is, basically, only slightly altered `ert--explain-equal'"
          (message "i: %s" i)) nil))))
 
 (ert-deftest i-test-for-in-alist ()
-  "Tests the expansion of i-iterate macro, (for (* . *) in **) driver."
+  "Tests the expansion of `i-iterate' macro, (for (* . *) in **) driver."
   (require 'i-iterate)
   (should
    (i/test-equals-ignore-gensym
@@ -160,7 +160,7 @@ This is, basically, only slightly altered `ert--explain-equal'"
          (message "a: %s . b: %s" a b)) nil))))
 
 (ert-deftest i-test-for-from-to ()
-  "Tests the expansion of i-iterate macro, (for (* . *) in **) driver."
+  "Tests the expansion of `i-iterate' macro, (for (* . *) in **) driver."
   (require 'i-iterate)
   (should
    (i/test-equals-ignore-gensym
@@ -171,7 +171,7 @@ This is, basically, only slightly altered `ert--explain-equal'"
          (incf i)) nil))))
 
 (ert-deftest i-test-for-across-symbol ()
-  "Tests the expansion of i-iterate macro, (for * across **) driver."
+  "Tests the expansion of `i-iterate' macro, (for * across **) driver."
   (require 'i-iterate)
   (should
    (i/test-equals-ignore-gensym
@@ -183,7 +183,7 @@ This is, basically, only slightly altered `ert--explain-equal'"
          (message "i: %d" i)) nil))))
 
 (ert-deftest i-test-for-across-list ()
-  "Tests the expansion of i-iterate macro, (for (*) across **) driver."
+  "Tests the expansion of `i-iterate' macro, (for (*) across **) driver."
   (require 'i-iterate)
   (let ((test-array [[[1 2 3 4] [5 5 5 5] [1 2 3 4]]
                      [[4 4 4 4] [1 2 3 4] [1 2 3 4]]
@@ -213,7 +213,7 @@ This is, basically, only slightly altered `ert--explain-equal'"
          (nreverse --5))))))
 
 (ert-deftest i-test-for-pairs ()
-  "Tests the expansion of i-iterate macro, (for (*) pairs **) driver."
+  "Tests the expansion of `i-iterate' macro, (for (*) pairs **) driver."
   (require 'i-iterate)
   (let ((test-hash (make-hash-table)))
     (dotimes (i 200)
@@ -238,7 +238,7 @@ This is, basically, only slightly altered `ert--explain-equal'"
          (nreverse --2))))))
 
 (ert-deftest i-test-for-pairs-pairs ()
-  "Tests the expansion of i-iterate macro, (for (*) pairs **) driver
+  "Tests the expansion of `i-iterate' macro, (for (*) pairs **) driver
 when used in combination with more pairs."
   (require 'i-iterate)
   (let ((test-hash (make-hash-table)))
@@ -273,7 +273,7 @@ when used in combination with more pairs."
          (nreverse --5))))))
 
 (ert-deftest i-test-with ()
-  "Tests the expansion of i-iterate macro, (for (*) pairs **) driver
+  "Tests the expansion of `i-iterate' macro, (for (*) pairs **) driver
 when used in combination with more pairs."
   (require 'i-iterate)
   (should
@@ -298,7 +298,7 @@ when used in combination with more pairs."
          (message "b - i: %s, c: %s" (- b i) c)) nil))))
 
 (ert-deftest i-test-for-on-list ()
-  "Tests the expansion of i-iterate macro, (for (*) on **) driver
+  "Tests the expansion of `i-iterate' macro, (for (*) on **) driver
 when used in combination with more pairs."
   (require 'i-iterate)
   (should
@@ -317,7 +317,7 @@ when used in combination with more pairs."
          (message "a: %s, b: %s, c: %s" a b c)) nil))))
 
 (ert-deftest i-test-for-on-alist ()
-  "Tests the expansion of i-iterate macro, (for (*) on **) driver
+  "Tests the expansion of `i-iterate' macro, (for (*) on **) driver
 when used in combination with more pairs."
   (require 'i-iterate)
   (should
@@ -330,7 +330,7 @@ when used in combination with more pairs."
          (message "a: %s, b: %s" a b)) nil))))
 
 (ert-deftest i-test-for-on-symbol ()
-  "Tests the expansion of i-iterate macro, (for (*) on **) driver
+  "Tests the expansion of `i-iterate' macro, (for (*) on **) driver
 when used in combination with more pairs."
   (require 'i-iterate)
   (should
@@ -343,7 +343,7 @@ when used in combination with more pairs."
          (message "a: %s" a)) nil))))
 
 (ert-deftest i-test-for-downfrom-hash ()
-  "Tests the expansion of i-iterate macro, (for (*) on **) driver
+  "Tests the expansion of `i-iterate' macro, (for (*) on **) driver
 when used in combination with more pairs."
   (require 'i-iterate)
   (should
@@ -358,7 +358,7 @@ when used in combination with more pairs."
          (decf i 2)) --0))))
 
 (ert-deftest i-test-for-upfrom-to-output ()
-  "Tests the expansion of i-iterate macro,
+  "Tests the expansion of `i-iterate' macro,
  (for * upfrom ** to ***) in combination with
  (output *) driver."
   (require 'i-iterate)
@@ -385,7 +385,7 @@ when used in combination with more pairs."
          (kill-buffer result))))))
 
 (ert-deftest i-test-for-words-in ()
-  "Tests the expansion of (for * words in **) i-iterate macro."
+  "Tests the expansion of (for * words in **) `i-iterate' macro."
   (require 'i-iterate)
   (should
    (i/test-equals-ignore-gensym
@@ -396,5 +396,77 @@ when used in combination with more pairs."
          (with-current-buffer "i-iterate.el"
            (setq i (buffer-substring (point) (progn (forward-word) (point)))))
          (message "i: %s" i)) nil))))
+
+(ert-deftest i-test-for-permutations-quickperm ()
+  "Tests the expansion of (for * permutations **) `i-iterate' macro."
+  (require 'i-iterate)
+  (should
+   (i/test-equals-ignore-gensym
+    (macroexpand '(++ (for a permutations [1 2 3 4])
+                    (message "array: %s" a)))
+    '(let* ((a [1 2 3 4])
+            (--4 (length a))
+            --0 (--3 (make-vector --4 0))
+            (--1 1) --2)
+       (while (< --1 --4)
+         (if (< (aref --3 --1) --1)
+             (progn
+               (setq --2 (if (oddp --1) (aref --3 --1) 0) --0 (aref a --2))
+               (aset a --2 (aref a --1))
+               (aset a --1 --0)
+               (message "array: %s" a)
+               (aset --3 --1 (1+ (aref --3 --1)))
+               (setq --1 1))
+           (aset --3 --1 0)
+           (incf --1))) nil))))
+
+(ert-deftest i-test-for-permutations-johnson-trotter ()
+  "Tests the expansion of (for * permutations ** algo johnson-trotter)
+`i-iterate' macro."
+  (require 'i-iterate)
+  (should
+   (i/test-equals-ignore-gensym
+    (macroexpand
+     '(++ (for a permutations [1 2 3 4] algo johnson-trotter)
+        (message "array: %s" a)))
+    '(let* ((a [1 2 3 4])
+            (--7 (length a))
+            --5 --4 --3 --2 --0
+            (--6 (let ((i 0) (m (make-vector --7 nil)))
+                   (while (< i --7)
+                     (aset m i (cons (quote 1-) i))
+                     (incf i))
+                   (setcar (aref m 0) nil) m))
+            (--1 0))
+       (while (some (function car) --6)
+         (setq --1 0 --2 nil)
+         (while (< --1 --7)
+           (destructuring-bind (tested-sign . tested-value)
+               (aref --6 --1)
+             (when (and tested-sign (or (not --2) (< --2 tested-value)))
+               (setq --2 tested-value --3 --1 --4 tested-sign)))
+           (incf --1))
+         (when --2
+           (setq --5 (funcall --4 --3))
+           (setq --0 (aref a --3))
+           (aset a --3 (aref a --5))
+           (aset a --5 --0)
+           (setq --0 (aref --6 --3))
+           (aset --6 --3 (aref --6 --5))
+           (aset --6 --5 --0)
+           (when (or (= --5 0)
+                     (= --5 (1- --7))
+                     (> (cdr (aref --6 (funcall --4 --5))) --2))
+             (setcar (aref --6 --5) nil))
+           (setq --1 0)
+           (while (< --1 --7)
+             (setq --5 (cdr (aref --6 --1)))
+             (when (> --5 --2)
+               (setcar (aref --6 --1)
+                       (if (< --1 --3)
+                           (quote 1+)
+                         (quote 1-))))
+             (incf --1))
+           (message "array: %s" a))) nil))))
 
 ;;; I-test.el ends here.
