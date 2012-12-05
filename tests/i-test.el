@@ -511,5 +511,24 @@ when used in combination with more pairs."
          (aset s (- i 10) 120)
          (message "%s" s)) nil))))
 
+(ert-deftest i-test-for-from-to-by-finally ()
+  "Tests the expansion of (for * random ** to ***)
+`i-iterate' macro."
+  (require 'i-iterate)
+  (should
+   (i/test-equals-ignore-gensym
+    (macroexpand '(++ (for i from 1 to 10 by 3)
+                    (message "i: %s" i)
+                    (finally (message "i: %s" (* i 2)))))
+    ;; This may seem somewhat controversial, it will print
+    ;; 26 instead of intuitively correct 20, bu this is
+    ;; consistent with how (loop ...) works too, so
+    ;; I'll keep it like this.
+    '(let* ((i 1))
+       (while (<= i 10)
+         (message "i: %s" i)
+         (incf i 3))
+       (message "i: %s" (* i 2))))))
+
 
 ;;; I-test.el ends here.

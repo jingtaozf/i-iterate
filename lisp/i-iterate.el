@@ -332,7 +332,8 @@ Use `i-add-for-handler' if you need to add your own driver")
                             (collect . i--parse-collect)
                             (hash . i--parse-hash)
                             (output . i--parse-output)
-                            (with . i--parse-with))
+                            (with . i--parse-with)
+                            (finally . i--parse-finally))
   "Top-level handlers used in expansion of `i-iterate' macro")
 
 (defvar i-spec-stack nil
@@ -1051,18 +1052,6 @@ generated with the same name."
     (incf gen-index)
     (make-symbol (concat "--" (number-to-string (1- gen-index))))))
 
-;; TODO: looks unused
-(defmethod i-add-driver ((spec i-spec) driver)
-  (with-slots (drivers) spec
-    ;; Cannot use add-to-list here
-    (unless (member driver drivers)
-      (push driver drivers))))
-
-;; TODO: looks unused
-(defmethod i-remove-driver ((spec i-spec) driver)
-  (with-slots (drivers) spec
-    (setq drivers (remove driver drivers))))
-
 (defmethod i-has-variable-p ((spec i-spec) variable)
   (some (lambda (x)
           (if (consp x) 
@@ -1076,7 +1065,6 @@ generated with the same name."
         current)
     (catch 't
       (while variables
-        (message "looking up var: %s" (car variables)) 
         (setq current (car variables) variables (cdr variables))
         (when (and (consp current) (eql (car current) variable))
           (throw 't t))) nil)))
@@ -1126,14 +1114,15 @@ generated with the same name."
         (unless nestedp
           (oset driver actions
                 `((setq ,location (cons ,form ,location)))))
-        (oset spec result `(nreverse ,location))
+        (oset spec result `((nreverse ,location)))
         (oset spec drivers (cons driver (oref spec drivers)))
-        (when nestedp `(setq ,location (cons ,form ,location)))))))
+        (when nestedp
+          `(setq ,location (cons ,form ,location)))))))
 
 (defun i--parse-hash (exp &optional spec)
   "Parses the (hash key &optional value into into table) expression.
-Note: it is possible to declare a hash-table here, so that all the declaration
-options will hold for the result."
+Note: it is possible to declare a hash-table here, so that all
+the declaration options will hold for the result."
   (let ((nestedp (not spec))
         (driver (make-instance 'i-driver))
         (spec (or spec  i-spec-stack))
@@ -1147,10 +1136,20 @@ options will hold for the result."
               (if (eql table-sym table)
                   `(,table-sym)
                 `((,table-sym (make-hash-table)))))
-        (oset spec result table-sym)
+        (oset spec result (list table-sym))
         (oset spec drivers (cons driver (oref spec drivers)))
         (oset driver actions
               `((puthash ,key ,val-sym ,table-sym)))))))
+
+(defun i--parse-finally (exp &optional spec)
+  (let (result-exp
+        (spec (or spec  i-spec-stack))
+        ;; This looks wrong, we've lost something underway
+        (exp (if (consp exp) exp (list exp))))
+    (setq result-exp (car (i--expand-in-environment exp spec)))
+    (oset spec result (append result-exp (oref spec result)))
+    result-exp))
+          
 
 (defun i--parse-output (exp &optional spec)
   "Similar to `with-output-to-string' collects all what is printed in
@@ -1222,8 +1221,8 @@ will bind `standard-output' to this variable."
                     (oset driver variables `((,new-place ,stdout)))
                     (oset driver stdout new-place)
                     new-place))))))
-        (oset spec result `(with-current-buffer ,place
-                             (buffer-string)))
+        (oset spec result `((with-current-buffer ,place
+                             (buffer-string))))
         (oset spec drivers (cons driver (oref spec drivers)))
         (oset driver cleanup-actions `((kill-buffer ,place)))
         ;; This can be further optimized by noting how many printing
@@ -1248,15 +1247,11 @@ VARS can be a symbol or a list"
 `i-iterate' macro, it forwards further expansion based on the prefix
 described in `i-expanders'"
   (let ((env (or env macroexpand-all-environment)))
-    (macrolet
-        ((collect (e))
-         (hash (e))
-         (output (e)))
-      (let ((e i-expanders))
-        (while e
-          (add-to-list 'env (car e))
-          (setq e (cdr e))))
-      (macroexpand-all (list exp) env))))
+    (let ((e i-expanders))
+      (while e
+        (add-to-list 'env (car e))
+        (setq e (cdr e))))
+    (macroexpand-all (list exp) env)))
 
 (defun i--parse-exp (exp spec)
   "Dispatches on the prefix of EXP, finds a proper handler in
@@ -1362,7 +1357,8 @@ REPLACEMENTS."
       (i-with-aggregated
        (exit-conditions variables actions special-actions
                         epilogue cleanup-actions) spec
-       (let* ((econds
+       (let* ((result (when result (append '(progn) result)))
+              (econds
                (cond
                 ((cdr exit-conditions)
                  (append '(and) (nreverse exit-conditions)))
