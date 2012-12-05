@@ -469,4 +469,47 @@ when used in combination with more pairs."
              (incf --1))
            (message "array: %s" a))) nil))))
 
+(ert-deftest i-test-for-random-with ()
+  "Tests the expansion of (for * random ** to ***)
+`i-iterate' macro."
+  (require 'i-iterate)
+  (should
+   (i/test-equals-ignore-gensym
+    (macroexpand '(++ (with ((s (make-string 90 ?-))))
+                    (for i random 10 to 100)
+                    (aset s (- i 10) ?x)
+                    (message "%s" s)))
+    '(let* ((--7 0) --4 --3 --2 --1
+            (--0 (make-vector (ceiling 90 31) 0))
+            i (s (make-string 90 45)))
+       (while (< --7 90)
+         (setq --1 (random 90))
+         (let* ((--5 (floor --1 31))
+                (--6 (lsh 1 (- --1 (* --5 31)))))
+           (if (= (logand (aref --0 --5) --6) 0)
+               (aset --0 --5 (logior (aref --0 --5) --6))
+             (setq --3 (1- --1) --4 (1+ --1) --2 t)
+             (while --2
+               (when (> --3 0)
+                 (setq --5 (floor --3 31)
+                       --6 (lsh 1 (- --3 (* --5 31))))
+                 (if (= (logand (aref --0 --5) --6) 0)
+                     (setf --1 --3 --2 nil
+                           (aref --0 --5)
+                           (logior (aref --0 --5) --6))
+                   (decf --3)))
+               (when (and --2 (< --4 90))
+                 (setq --5 (floor --4 31)
+                       --6 (lsh 1 (- --4 (* --5 31))))
+                 (if (= (logand (aref --0 --5) --6) 0)
+                     (setf --1 --4 --2 nil
+                           (aref --0 --5)
+                           (logior (aref --0 --5) --6))
+                   (incf --4))))))
+         (incf --7)
+         (setq i (+ --1 10))
+         (aset s (- i 10) 120)
+         (message "%s" s)) nil))))
+
+
 ;;; I-test.el ends here.

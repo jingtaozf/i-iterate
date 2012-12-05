@@ -384,7 +384,9 @@ HANDLER is the body of the generated function."
       exp
     (unless (i-has-variable-p spec var)
       (oset driver variables `((,var ,begin))))
-    (let ((act (if (eql verb 'downfrom) 'decf 'incf))
+    (let ((act (if (or (eql verb 'downfrom)
+                       (eql target 'downto))
+                   'decf 'incf))
           (sym (when how
                  (if (i-constexp-p iterator)
                      iterator
@@ -414,6 +416,97 @@ HANDLER is the body of the generated function."
             (oset driver variables
                   (cons (list sym limit) (oref driver variables))))
           (oset driver exit-conditions `((,op ,var ,sym))))))))
+
+(i-add-for-handler random (spec driver exp)
+  (destructuring-bind                   ; this isn't perfect, 0
+                                        ; should be the default
+                                        ; for lower bound, need
+                                        ; different way to express it
+      (var verb lower to upper &optional superimpose-bits)
+      exp
+    (when (i-variable-has-initializer spec var)
+      (signal 'i-redefine-variable var))
+    (let* ((limit (if (and (numberp lower) (numberp upper))
+                      ;; we can immediately calculate the limit
+                      (- upper lower)
+                    (i-gensym spec)))
+           (limit-exp
+            (unless (numberp limit) `((,limit (- ,upper ,lower)))))
+           (cache (i-gensym spec))
+           (next-random (i-gensym spec))
+           (searching (i-gensym spec))
+           (left-shift (i-gensym spec))
+           (right-shift (i-gensym spec))
+           (divisor (i-gensym spec))
+           (remainder (i-gensym spec))
+           (i (i-gensym spec))
+           (i-exp `((,i 0)))
+           (corrector
+            (cond
+             ((numberp i)
+              nil)
+             ((i-constexp-p lower)
+              lower)
+             (t (i-gensym spec))))
+           (corrector-exp
+            (when (and corrector (not (eq lower corrector)))
+              `((,corrector ,lower))))
+           (var-exp (if corrector `(+ ,next-random ,corrector)
+                      next-random))     ; can save here, but mind boggling
+           (bits (cond
+                  ((and superimpose-bits
+                        (i-constexp-p superimpose-bits))
+                   superimpose-bits)
+                  (superimpose-bits
+                   (i-gensym spec))
+                  (t 31)))
+           (bits-exp
+            (when (and (not (numberp bits))
+                       (not (eq bits superimpose-bits)))
+              `((,bits ,superimpose-bits)))))
+      (oset driver variables
+            `(,var                      ; (ceiling ,limit ,bits)
+                                        ; some times can be calculated
+                                        ; when expanded
+              (,cache (make-vector (ceiling ,limit ,bits) 0))
+              ,next-random ,searching ,left-shift ,right-shift
+              ,@corrector-exp ,@i-exp ,@bits-exp ,@limit-exp))
+      (oset driver exit-conditions `((< ,i ,limit)))
+      (oset driver actions
+            `((setq ,next-random (random ,limit))
+              (let* ((,divisor (floor ,next-random ,bits))
+                     (,remainder (lsh 1 (- ,next-random (* ,divisor ,bits)))))
+                (if (= (logand (aref ,cache ,divisor) ,remainder) 0)
+                    ;; we have a good random
+                    (aset ,cache ,divisor
+                          (logior (aref ,cache ,divisor) ,remainder))
+                  ;; will search for closest unset bit
+                  (setq ,left-shift (1- ,next-random)
+                        ,right-shift (1+ ,next-random)
+                        ,searching t)
+                  (while ,searching
+                    ;; step left and try again
+                    (when (> ,left-shift 0)
+                      (setq ,divisor (floor ,left-shift ,bits)
+                            ,remainder (lsh 1 (- ,left-shift (* ,divisor ,bits))))
+                      (if (= (logand (aref ,cache ,divisor) ,remainder) 0)
+                          (setf ,next-random ,left-shift
+                                ,searching nil
+                                (aref ,cache ,divisor)
+                                (logior (aref ,cache ,divisor) ,remainder))
+                        (decf ,left-shift)))
+                    ;; step right and try again
+                    (when (and ,searching (< ,right-shift ,limit))
+                      (setq ,divisor (floor ,right-shift ,bits)
+                            ,remainder (lsh 1 (- ,right-shift (* ,divisor ,bits))))
+                      (if (= (logand (aref ,cache ,divisor) ,remainder) 0)
+                          (setf ,next-random ,right-shift
+                                ,searching nil
+                                (aref ,cache ,divisor)
+                                (logior (aref ,cache ,divisor) ,remainder))
+                        (incf ,right-shift))))))
+              (incf ,i)
+              (setq ,var ,var-exp))))))
 
 (i-add-for-handler (keys values pairs) (spec driver exp) i-hash-driver
   (destructuring-bind (var verb table &optional limit how)
@@ -983,8 +1076,10 @@ generated with the same name."
         current)
     (catch 't
       (while variables
+        (message "looking up var: %s" (car variables)) 
         (setq current (car variables) variables (cdr variables))
-        (when (consp current) (throw 't t))) nil)))
+        (when (and (consp current) (eql (car current) variable))
+          (throw 't t))) nil)))
 
 ;; TODO: untested
 (defmethod i-update-variable ((this i-spec) name value)
