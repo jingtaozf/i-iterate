@@ -324,7 +324,8 @@ Use `i-add-for-handler' if you need to add your own driver")
 
 (defvar i-expanders '((collect . i--parse-collect)
                       (hash . i--parse-hash)
-                      (output . i--parse-output))
+                      (output . i--parse-output)
+                      (return . i--parse-return))
   "The expanders used in the nested forms in the `i-iterate' macro")
 
 (defvar i-prefix-handlers '((repeat . i--parse-repeat)
@@ -592,6 +593,9 @@ HANDLER is the body of the generated function."
                 ;; Simple solution for now: just break from loop on limit
                 ;; This block is the copy-paste of the similar block in
                 ;; the other branch, but it will be different some day.
+                ;; 
+                ;; FIXME: this is all wrong, we need to generate the throw
+                ;; block and append it ourselves!
                 (when how
                   (oset spec break-condition-triggers
                         (cons 
@@ -1138,18 +1142,37 @@ the declaration options will hold for the result."
                 `((,table-sym (make-hash-table)))))
         (oset spec result (list table-sym))
         (oset spec drivers (cons driver (oref spec drivers)))
-        (oset driver actions
-              `((puthash ,key ,val-sym ,table-sym)))))))
+        (car (oset driver actions
+                   `((puthash ,key ,val-sym ,table-sym))))))))
 
 (defun i--parse-finally (exp &optional spec)
+  "Parses the (finally ...) expression. This expression is executed
+after the loop terminates normally."
+  ;; TODO: perhaps it would make sense to check that there is only
+  ;; one finally clause, not sure what would be the implication of
+  ;; having more then one.
   (let (result-exp
         (spec (or spec  i-spec-stack))
         ;; This looks wrong, we've lost something underway
         (exp (if (consp exp) exp (list exp))))
-    (setq result-exp (car (i--expand-in-environment exp spec)))
+    (setq result-exp (i--expand-in-environment exp spec))
     (oset spec result (append result-exp (oref spec result)))
     result-exp))
-          
+
+(defmethod i-generate-break ((this i-spec) exp)
+  "Generates a (throw last-in-the-loop exp) block and runs the epilogue.
+Will set `break-condition' if it wasn't previously set."
+  (let ((catch-marker
+         (or (oref this break-condition)
+             (oset this break-condition (i-gensym this)))))
+    `(throw ',catch-marker
+            (progn ,(i--expand-in-environment exp)))))
+
+(defun i--parse-return (exp &optional spec)
+  "Parses the (return ...) expression. This expression unconditionally
+exits the loop body and does not urn the epilogue code."
+  (i-generate-break (or spec  i-spec-stack)
+                     (if (consp exp) exp (list exp))))
 
 (defun i--parse-output (exp &optional spec)
   "Similar to `with-output-to-string' collects all what is printed in
@@ -1231,7 +1254,7 @@ will bind `standard-output' to this variable."
         ;; this let.
         (oset driver actions
               `((let ((standard-output ,place))
-                 ,@(i--expand-in-environment print-exp))))))))
+                  ,(i--expand-in-environment print-exp))))))))
 
 ;; TODO: We can check whether the variables declared here are used
 ;; in other clauses, and re-use them instead of creating extra variables.
@@ -1251,7 +1274,7 @@ described in `i-expanders'"
       (while e
         (add-to-list 'env (car e))
         (setq e (cdr e))))
-    (macroexpand-all (list exp) env)))
+    (macroexpand-all exp env)))
 
 (defun i--parse-exp (exp spec)
   "Dispatches on the prefix of EXP, finds a proper handler in
@@ -1259,10 +1282,10 @@ described in `i-expanders'"
   (let ((handler (cdr (assoc (car exp) i-prefix-handlers))))
     (if handler
         (funcall handler
-                 (car (i--expand-in-environment (cdr exp))) spec)
+                 (i--expand-in-environment (cdr exp)) spec)
       (with-slots (body) spec
          (let ((i-spec-stack spec))
-           (push (car (i--expand-in-environment exp)) body))))))
+           (push (i--expand-in-environment exp) body))))))
 
 (defun i--parse-specs (specs)
   "Parses SPECS and creates an AST represented in an instance of
@@ -1368,7 +1391,7 @@ REPLACEMENTS."
               (break-form
                (when (oref spec break-condition)
                  `(when (or ,@(oref spec break-condition-triggers))
-                    (throw ',(oref spec break-condition) nil))))
+                    (throw ',(oref spec break-condition) --i-result-form))))
               (mandatory-block
                (cond
                 ((null hash-drivers)
@@ -1416,24 +1439,32 @@ REPLACEMENTS."
               `(progn
                  (let* (,@vars)
                    (--i-unwind-form
-                    (catch ',break-condition ,@mandatory-block)
-                    ,result))))
+                    (catch ',break-condition ,@mandatory-block
+                           ,@(unless break-form '(--i-result-form)))))))
              (break-condition
               `(progn
                  (--i-unwind-form
-                  (catch ',break-condition (,@mandatory-block)) ,result)))
+                  (catch ',break-condition (,@mandatory-block)
+                         ,@(unless break-form '(--i-result-form))))))
              (variables
-              `(let* (,@vars) (--i-unwind-form ,@mandatory-block ,result)))
-             (t `(progn (--i-unwind-form ,@mandatory-block ,result))))
+              `(let* (,@vars)
+                 (--i-unwind-form
+                  ,@mandatory-block
+                  ,@(unless break-form '(--i-result-form)))))
+             (t `(progn
+                   (--i-unwind-form
+                    ,@mandatory-block 
+                    ,@(unless break-form '(--i-result-form))))))
             cleanup-actions)
            '(--i-special-actions-form
              --i-actions-form
              --i-body-form
-             --i-init-form --i-break-form --i-epilogue-form)
+             --i-init-form
+             --i-break-form --i-result-form --i-epilogue-form)
            (list (append '(progn) special-actions)
                  (append '(progn) actions)
                  (append '(progn) (reverse body))
-                 init-form break-form
+                 init-form break-form result
                  (append '(progn) epilogue)))))))))
 (defalias '++ 'i-iterate)
 
