@@ -48,6 +48,9 @@
 ;; (for * gaussian ** to ***) - like random, except that values are choosen
 ;; using Gaussian distribution (standard deviation).
 ;;
+;; (for * over **) - visit all nodes of the tree **
+;; (so far only the depth-first variant)
+;;
 ;; (for * product **) - populates * (variable or a list of)
 ;; with dot-products of **, e.g. (for (x y) product '(1 2) '(3 4))
 ;; will produce:
@@ -374,6 +377,8 @@ HANDLER is the body of the generated function."
        (puthash ',name ,driver i-for-drivers))))
 
 (defsubst i-constexp-p (exp)
+  "Returns non-nil if EXP is a constant (doesn't require creating an
+additional variable)"
   (or (atom exp)
       (and (consp exp)
            (eql (car exp) 'function)
@@ -418,6 +423,24 @@ HANDLER is the body of the generated function."
             (oset driver variables
                   (cons (list sym limit) (oref driver variables))))
           (oset driver exit-conditions `((,op ,var ,sym))))))))
+
+(i-add-for-handler depth-first (spec driver exp)
+  (destructuring-bind (var verb tree) exp
+    (let ((node (i-gensym spec))
+          (stack (i-gensym spec)))
+      (oset driver variables `((,node ,tree) ,stack))
+      (oset driver exit-conditions `((or ,node ,stack)))
+      (oset spec has-body-insertion-p t)
+      (oset driver actions
+            `((cond
+               ((null ,node)
+                (setq ,node (car ,stack) ,stack (cdr ,stack)))
+               ((consp (car ,node))
+                (setf ,stack (cons (cdr ,node) ,stack)
+                      ,node (car ,node)))
+               (t (setq ,var (car ,node))
+                  --i-body-form
+                  (setq ,node (cdr ,node)))))))))
 
 (i-add-for-handler random (spec driver exp)
   (destructuring-bind                   ; this isn't perfect, 0
