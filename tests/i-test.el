@@ -566,5 +566,31 @@ of `i-iterate' macro."
              (message "i: %s" i)
              (setq --0 (cdr --0)))))))))
 
+(ert-deftest i-test-for-breadth-first ()
+  "Tests the expansion of (for * breadth-first **) 
+of `i-iterate' macro."
+  (require 'i-iterate)
+  (should
+   (i/test-equals-ignore-gensym
+    (macroexpand
+     '(++ (for i breadth-first
+               '((1 (2 3) ((4) 5) ((((6 7 8))) 9 10 (11)))))
+        (message "i: %s" i)))
+    '(let* (i (--0 (quote ((1 (2 3) ((4) 5)
+                              ((((6 7 8))) 9 10 (11))))))
+              (--2 --0) (--1 --0))
+       (while --2
+         (setq --2 nil)
+         (while --1
+           (setq i (car --1))
+           (cond
+            ((and (consp i) (null (cdr i)))
+             (setq --2 (cons (car i) --2)))
+            ((consp i)
+             (setq --2 (cons (car i) --2) --2 (cons (cdr i) --2)))
+            (t (message "i: %s" i)))
+           (setq --1 (cdr --1)))
+         (setq --1 --2))))))
+
 
 ;;; I-test.el ends here.
