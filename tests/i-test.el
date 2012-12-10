@@ -551,16 +551,17 @@ of `i-iterate' macro."
   (should
    (i/test-equals-ignore-gensym
     (macroexpand
-     '(++ (for i depth-first '((1 (2 3) ((4) 5) ((((6 7 8))) 9 10 (11)))))
+     '(++ (for i depth-first
+               '((1 (2 3) ((4) 5) ((((6 7 8))) 9 10 (11)))))
         (message "i: %s" i)))
-    '(let* (--1 (--0 (quote ((1 (2 3) ((4) 5) ((((6 7 8))) 9 10 (11)))))))
+    '(let* (i --1 (--0 (quote ((1 (2 3) ((4) 5)
+                                  ((((6 7 8))) 9 10 (11)))))))
        (while (or --0 --1)
          (cond
           ((null --0)
            (setq --0 (car --1) --1 (cdr --1)))
           ((consp (car --0))
-           (setf --1 (cons (cdr --0) --1)
-                 --0 (car --0)))
+           (setf --1 (cons (cdr --0) --1) --0 (car --0)))
           (t (setq i (car --0))
              (message "i: %s" i)
              (setq --0 (cdr --0)))))))))

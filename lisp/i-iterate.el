@@ -428,7 +428,7 @@ additional variable)"
   (destructuring-bind (var verb tree) exp
     (let ((node (i-gensym spec))
           (stack (i-gensym spec)))
-      (oset driver variables `((,node ,tree) ,stack))
+      (oset driver variables `((,node ,tree) ,stack ,var))
       (oset driver exit-conditions `((or ,node ,stack)))
       (oset spec has-body-insertion-p t)
       (oset driver actions
@@ -441,6 +441,31 @@ additional variable)"
                (t (setq ,var (car ,node))
                   --i-body-form
                   (setq ,node (cdr ,node)))))))))
+
+(i-add-for-handler breadth-first (spec driver exp)
+  (destructuring-bind (var verb tree) exp
+    (let ((roots (i-gensym spec))
+          (iterator (i-gensym spec))
+          (generation (i-gensym spec)))
+      (oset driver variables
+            `((,iterator ,roots)
+              (,generation ,roots) (,roots ,tree) ,var))
+      (oset driver exit-conditions `(,generation))
+      (oset spec has-body-insertion-p t)
+      (oset driver actions
+            `((progn
+                (setq ,generation nil)
+                (while ,iterator
+                  (setq ,var (car ,iterator)) 
+                  (cond
+                   ((and (consp ,var) (null (cdr ,var)))
+                    (setq ,generation (cons (car ,var) ,generation)))
+                   ((consp ,var)
+                    (setq ,generation (cons (car ,var) ,generation)
+                          ,generation (cons (cdr ,var) ,generation)))
+                   (t --i-body-form))
+                  (setq ,iterator (cdr ,iterator)))
+                (setq ,iterator ,generation)))))))
 
 (i-add-for-handler random (spec driver exp)
   (destructuring-bind                   ; this isn't perfect, 0
@@ -1331,28 +1356,36 @@ described in `i-expanders'"
   "Some macros will generate (prong (form)) calls because it is 
 easy to generate it this way, but we can remove them all when 
 post-processing."
-  (cond
-   ((null exp) nil)
-   ((consp exp)
+  (cl-labels ((%implicit-progn-helper 
+            (x)
+            (mapcan
+             (lambda (y)
+               (if (and (consp y) (eql (car y) 'progn))
+                   (cdr y) (list y)))
+             x))
+           (%identify-implicit-progn 
+            (x)
+            (and (consp x) (eql (car x) 'progn))))
     (cond
-     ((and (eql (car exp) 'progn)       ; progn containing single
+     ((null exp) nil)
+     ((consp exp)
+      (cond
+       ((and (eql (car exp) 'progn)     ; progn containing single
                                         ; sexp or symbol
-           (or (null (cdr exp)) (null (cddr exp))))
-      (if (null (cdr exp)) nil
-        (i--remove-surplus-progn (cadr exp))))
-     ;; some known implicit progns
-     ((and (member (car exp) '(while lambda catch when unless))
-           (some (lambda (x) (and (consp x) (eql (car x) 'progn)))
-                 (cdr exp)))
-      (cons (car exp)
-            (i--remove-surplus-progn 
-             (mapcan (lambda (x)
-                       (if (and (consp x) (eql (car x) 'progn))
-                           (cdr x) (list x)))
-                     (cdr exp)))))
-     (t (cons (i--remove-surplus-progn (car exp))
-              (i--remove-surplus-progn (cdr exp))))))
-   (t exp)))
+             (or (null (cdr exp)) (null (cddr exp))))
+        (if (null (cdr exp)) nil
+          (i--remove-surplus-progn (cadr exp))))
+       ;; some known implicit progns
+       ((and (member (car exp) '(while lambda catch when unless))
+             (some #'%identify-implicit-progn (cddr exp)))
+        (let ((head (i--remove-surplus-progn (cadr exp)))
+              (stage (%implicit-progn-helper (cddr exp))))
+          (while (some #'%identify-implicit-progn stage)
+            (setq stage (%implicit-progn-helper stage)))
+          (append (list (car exp) head) (i--remove-surplus-progn stage))))
+       (t (cons (i--remove-surplus-progn (car exp))
+                (i--remove-surplus-progn (cdr exp))))))
+     (t exp))))
 
 (defun i--replace-non-nil (exp symb replacement)
   "Replaces symbol SYMB in expression EXP with REPLACEMENT, if
