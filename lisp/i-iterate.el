@@ -48,9 +48,6 @@
 ;; (for * gaussian ** to ***) - like random, except that values are choosen
 ;; using Gaussian distribution (standard deviation).
 ;;
-;; (for * over **) - visit all nodes of the tree **
-;; (so far only the depth-first variant)
-;;
 ;; (for * product **) - populates * (variable or a list of)
 ;; with dot-products of **, e.g. (for (x y) product '(1 2) '(3 4))
 ;; will produce:
@@ -120,10 +117,6 @@
 ;; uniting, accumulating. with predicates
 ;;
 ;; (finding * such-that ** (into ***) on-failure ****)
-;;
-;; always, never, thereis
-;;
-;; finish, leave, while, until, finally
 ;;
 ;; Possible usage examples: create a driver for fibonacci and factorial
 ;; progressions.
@@ -1219,8 +1212,7 @@ Will set `break-condition' if it wasn't previously set."
 (defun i--parse-return (exp &optional spec)
   "Parses the (return ...) expression. This expression unconditionally
 exits the loop body and does not urn the epilogue code."
-  (i-generate-break (or spec  i-spec-stack)
-                     (if (consp exp) exp (list exp))))
+  (i-generate-break (or spec  i-spec-stack) exp))
 
 (defun i--parse-output (exp &optional spec)
   "Similar to `with-output-to-string' collects all what is printed in

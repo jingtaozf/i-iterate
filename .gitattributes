@@ -2,5 +2,6 @@
 /Makefile -text
 /README -text
 /i-pkg.el -text
+info/i-iterate.texi -text
 lisp/i-iterate.el -text
 tests/i-test.el -text
