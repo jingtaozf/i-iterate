@@ -1,5 +1,9 @@
 # Compiles, tests and packages i-iterate.el
 # and bytecode compilation of *.el files
+# This script uses
+# http://search.cpan.org/~martykube/HTML-WikiConverter-GoogleCode-0.12/
+# for generating GoogleWiki pages (unfortunately, it doesn't capitalize
+# the names of the pages).
 
 PACKAGE = i-iterate
 DOCDST = ${PACKAGE}/docs
@@ -24,7 +28,7 @@ $(DOCDST)/%.info: $(DOCSRC)/%.texi
 $(WIKIDST)/%.wiki: $(HTMLDOCDST)/%.html
 	$(HTML2WIKI) $(HTML2WIKIO) $< > $@
 
-default: prepare $(INFO) move-html $(WIKI) byte-compile
+default: prepare $(INFO) move-html $(WIKI) rename-wiki byte-compile
 	cp -r lisp info Makefile README i-pkg.el ${PACKAGE}
 
 prepare:
@@ -35,6 +39,11 @@ prepare:
 move-html:
 	$(shell [[ -e `find ./ -maxdepth 1 -name "*.html"` ]] || \
 mv -f *.html ${HTMLDOCDST}/)
+
+rename-wiki:
+	$(shell cd ${WIKIDST} && rename 'i-iterate' 'Iterate' *.wiki)
+	$(shell find ${WIKIDST} -name "*.wiki" -exec \
+sed -i 's/\[i-iterate/\[Iterate/g' '{}' \;)
 
 byte-compile:
 	emacs -Q -L ./lisp -batch -f batch-byte-compile ./lisp/*.el
