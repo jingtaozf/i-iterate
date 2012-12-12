@@ -33,8 +33,7 @@ prepare:
 	mkdir -p ${HTMLDOCDST}
 
 move-html:
-	rm -f ${HTMLDOCDST}/*.html
-	$(shell find ./ -maxdepth 1 -name "*.html" > /dev/null || \
+	$(shell [[ -e `find ./ -maxdepth 1 -name "*.html"` ]] || \
 mv -f *.html ${HTMLDOCDST}/)
 
 byte-compile:
