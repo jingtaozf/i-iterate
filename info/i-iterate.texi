@@ -118,75 +118,18 @@ as a function to select the next list cell.
 @strong{List of available drivers}
 
 @menu 
+* initially:: A driver that runs before any code in the iteration.
+* finally::   A driver that runs when the iteration finishes normally.
 * for::       A multi-purpose driver for doing variety of things.
-* with::      A driver for variable declaration.
 * generate::  A general purpose generator driver.
 * repeat::    A simple driver for performing iteration N number of items.
-* finally::   A driver that runs when the iteration finishes normally.
-* initially:: A driver that runs before any code in the iteration.
+* with::      A driver for variable declaration.
 @end menu
 
-@node for
-@section Multi-purpose driver
+@node initially
+@section Runs the prologue code
 
-This driver can perform many different task. Each of these tasks usually
-has it's own continuation. Below is the list of the existing (or planned)
-continuations. For examples of how to implement your own continuation see
-@defmac i-add-for-handler name arguments &optional driver
-&rest handler [doc-string]
-@end defmac
-
-@strong{For continuations}
-
-@menu
-* in on::                     Iterates over lists.
-* upfrom from downfrom::      Iterates numerically.
-* across reverse binary::     Iterates over arrays.
-* depth-first breadth-first:: Iterates over trees.
-* keys values pairs::         Iterates over hash-tables.
-* random::                    Produces unique random each iteration.
-* chars words lines::         Iterates over entities in buffer.
-* permutations::              Generates permutation of an array.
-* dot-product join distinct:: Iterates over sets.
-@end menu
-
-@node with
-@section Variable declaration
-
-This driver is very similar to @code{let*} in effect. It allows you
-to declare variables you can use later inside other drivers. It can
-be particularly useful when you need to initialize the variables you
-are collecting into with some values, before the first collection can
-occur.
-
-@example
-(++ (with ((a (let ((x 0)) 
-                (map 'vector (lambda (y) (+ y (incf x)))
-                     (make-vector 10 0))))
-           (b 100) c))
-  (for i across a)
-  (message "b - i: %s, c: %s" (- b i) c))
-@end example
-
-This example initializes the variable @code{a} to be an array of a length
-of 100 and loops over the values in the created array.
-
-@node generate
-@section User-provided generators
-
-This feature is not implemented yet.
-
-@node repeat
-@section Repeats the code N times
-
-This driver uses the form of @code{(repeat N)}, where N is the number of
-times to run the body of the macro.
-
-@example
-(++ (repeat 100) (message "Hello, world!"))
-@end example
-
-This example will print the line ``Hello, world'' 100 times.
+This driver is not implemented yet
 
 @node finally
 @section Runs the epilogue code
@@ -203,13 +146,96 @@ is any Lisp code.
 
 This example will print ``1, 4, 7, 10, 26''
 
-@node initially
-@section Runs the prologue code
+@node for
+@section Multi-purpose driver
 
-This driver is not implemented yet
+This driver can perform many different task. Each of these tasks usually
+has it's own continuation. Below is the list of the existing (or planned)
+continuations. For examples of how to implement your own continuation see
+@defmac i-add-for-handler name arguments &optional driver
+&rest handler [doc-string]
+@end defmac
 
-@comment Keyword nodes
+@strong{For continuations}
 
+@menu
+* across reverse binary::     Iterates over arrays.
+* chars words lines::         Iterates over entities in buffer.
+* depth-first breadth-first:: Iterates over trees.
+* dot-product join distinct:: Iterates over sets.
+* in on::                     Iterates over lists.
+* keys values pairs::         Iterates over hash-tables.
+* permutations::              Generates permutation of an array.
+* random::                    Produces unique random each iteration.
+* upfrom from downfrom::      Iterates numerically.
+@end menu
+
+@c ===========================================================================
+@c Start for continuations
+@c ===========================================================================
+@node across reverse binary
+@subsection Iterate over arrays
+
+This continuation can take following forms:
+@code{(for VARIABLES across|reverse|binary ARRAY)}, where VARIABLES can be
+a symbol or a list of symbols. In the later case, subsequent symbols are
+taken to mean array dimensions. I.e. if the VARIABLES is (A B), then the
+array is assumed to have at least two dimensions, and the code generated will
+attempt to iterate over the second dimension too. In the later case, other
+body expression are run inside the innermost loop.
+
+@code{reverse} and @code{binary} are not implemented yet.
+
+@example
+(++ (for i across [1 2 3 4]) (message "i: %d" i))
+@end example
+
+This example will iterate over the elements of @code{[1 2 3 4]} array and
+print them.
+@c ===========================================================================
+@node chars words lines
+@subsection Iterate over characters, words or lines in a buffer
+
+This continuation iterates over characters, words or lines using
+Emacs navigation commands, @code{forward-char}, @code{forward-word}
+and @code{forward-line}. You can also set the buffer, where the
+iteration takes place. It acts similar to @code{with-current-buffer}
+macro.
+This continuation uses syntax:
+@code{(for VARIABLE chars|words|lines [in BUFFER])}, where VARIABLE
+is set to the next character, word or line of the BUFFER.
+
+@example
+(++ (for i words in "*scratch*")
+  (message "i: %s" i))
+@end example
+
+This example will switch to the ``*scratch*'' buffer and will then
+print every word from the current point position and until the end
+of the buffer.
+@c ===========================================================================
+@node depth-first breadth-first
+@subsection Iterate over trees
+
+As the name suggests, these drivers iterate over trees in either depth-first
+or breadth-first order (both happen linearly, no recursion involved). These
+drivers use syntax: @code{(for VARIABLE depth-first|breadth-first TREE)}.
+The VARIABLE is set to leafs only in either case.
+
+@example
+(++ (for i depth-first
+         '((1 (2 3) ((4) 5) ((((6 7 8))) 9 10 (11)))))
+  (message "i: %s" i))
+@end example
+
+This example will print ``i: 1, i: 2, i: 3, i: 4, i: 5, i: 6, i: 7, i: 8,
+i: 9, i: 10, i: 11''.
+@c ===========================================================================
+@node dot-product join distinct
+@subsection Iterate over sets
+
+These continuations aren't implemented yet.
+@c ===========================================================================
 @node in on
 @subsection Iterates over lists
 
@@ -241,65 +267,7 @@ to the list being iterated to obtain the pointer to the next cell.
 This example will set @code{i} to (1 2 3 4), (2 3 4), (3 4), (4) in turns, and
 if the value of @code{(car i)} happens to be odd, will terminate the iteration
 and return that value multiplied by 7. Since 1 is odd, the value returned is 7.
-
-@node upfrom from downfrom
-@subsection Numerical iteration
-
-This continuation uses this syntax:
-@code{(for VARIABLE from|downfrom|upfrom [to|upto|below LIMIT [by STEP]])}.
-Where VARIABLE is a variable set to the subsequent products of the iteration.
-@code{from} and @code{upfrom} are synonymous. If you use @code{from} with no
-further arguments, then the default is to iterate by one upwards, and if you
-use @code{downfrom} with no arguments, then the default is to decrease the
-variable by one at each step. @code{to} implies that the LIMIT is inclusive
-and must happen during the iteration, @code{upto} implies that only the values
-strictly less then LIMIT can happen during iteration, @code{below} implies
-that the values below the limit as well as the limit itself will happen during
-the iteration.
-
-@example
-(++ (for i from 0 to 10) (message "i: %s" i))
-@end example
-
-This example will iterate over values 0..10 inclusive and print them.
-
-@node across reverse binary
-@subsection Iterate over arrays
-
-This continuation can take following forms:
-@code{(for VARIABLES across|reverse|binary ARRAY)}, where VARIABLES can be
-a symbol or a list of symbols. In the later case, subsequent symbols are
-taken to mean array dimensions. I.e. if the VARIABLES is (A B), then the
-array is assumed to have at least two dimensions, and the code generated will
-attempt to iterate over the second dimension too. In the later case, other
-body expression are run inside the innermost loop.
-
-@code{reverse} and @code{binary} are not implemented yet.
-
-@example
-(++ (for i across [1 2 3 4]) (message "i: %d" i))
-@end example
-
-This example will iterate over the elements of @code{[1 2 3 4]} array and
-print them.
-
-@node depth-first breadth-first
-@subsection Iterate over trees
-
-As the name suggests, these drivers iterate over trees in either depth-first
-or breadth-first order (both happen linearly, no recursion involved). These
-drivers use syntax: @code{(for VARIABLE depth-first|breadth-first TREE)}.
-The VARIABLE is set to leafs only in either case.
-
-@example
-(++ (for i depth-first
-         '((1 (2 3) ((4) 5) ((((6 7 8))) 9 10 (11)))))
-  (message "i: %s" i))
-@end example
-
-This example will print ``i: 1, i: 2, i: 3, i: 4, i: 5, i: 6, i: 7, i: 8,
-i: 9, i: 10, i: 11''.
-
+@c ===========================================================================
 @node keys values pairs
 @subsection Iterate over hash-table
 
@@ -320,49 +288,7 @@ variable for values.
 This example will iterate over a hash-table @code{test-hash} and collect
 its keys into an alist, with keys being the in the @code{car} position and
 values being in @code{cdr} position.
-
-@node random
-@subsection Generate N unique random numbers
-
-This continuation will generate unique random numbers during iteration,
-it uses syntax: @code{(for VARIABLE random LOW to HIGH)}, where
-VARIABLE is the variable that will be set to the next random number,
-LOW is the lower bound and HIGH is the higher bound of the numbers being
-generated.
-
-@example
-(++ (with ((s (make-string 90 ?-))))
-  (for i random 10 to 100)
-  (aset s (- i 10) ?x)
-  (message "%s" s))
-@end example
-
-This example will print 90 lines 90 characters long, originally
-containing only ``-'' characters, but being randomly replaced by ``x''
-character. The last line should be entirely replaced with ``x''
-characters.
-
-@node chars words lines
-@subsection Iterate over characters, words or lines in a buffer
-
-This continuation iterates over characters, words or lines using
-Emacs navigation commands, @code{forward-char}, @code{forward-word}
-and @code{forward-line}. You can also set the buffer, where the
-iteration takes place. It acts similar to @code{with-current-buffer}
-macro.
-This continuation uses syntax:
-@code{(for VARIABLE chars|words|lines [in BUFFER])}, where VARIABLE
-is set to the next character, word or line of the BUFFER.
-
-@example
-(++ (for i words in "*scratch*")
-  (message "i: %s" i))
-@end example
-
-This example will switch to the ``*scratch*'' buffer and will then
-print every word from the current point position and until the end
-of the buffer.
-
+@c ===========================================================================
 @node permutations
 @subsection Produce permutations of an array
 
@@ -388,11 +314,91 @@ change in the future.
 
 This example will generate all 24 permutations of the
 @code{[1 2 3 4]} array.
+@c ===========================================================================
+@node random
+@subsection Generate N unique random numbers
 
-@node dot-product join distinct
-@subsection Iterate over sets
+This continuation will generate unique random numbers during iteration,
+it uses syntax: @code{(for VARIABLE random LOW to HIGH)}, where
+VARIABLE is the variable that will be set to the next random number,
+LOW is the lower bound and HIGH is the higher bound of the numbers being
+generated.
 
-These continuations aren't implemented yet.
+@example
+(++ (with ((s (make-string 90 ?-))))
+  (for i random 10 to 100)
+  (aset s (- i 10) ?x)
+  (message "%s" s))
+@end example
+
+This example will print 90 lines 90 characters long, originally
+containing only ``-'' characters, but being randomly replaced by ``x''
+character. The last line should be entirely replaced with ``x''
+characters.
+@c ===========================================================================
+@node upfrom from downfrom
+@subsection Numerical iteration
+
+This continuation uses this syntax:
+@code{(for VARIABLE from|downfrom|upfrom [to|upto|below LIMIT [by STEP]])}.
+Where VARIABLE is a variable set to the subsequent products of the iteration.
+@code{from} and @code{upfrom} are synonymous. If you use @code{from} with no
+further arguments, then the default is to iterate by one upwards, and if you
+use @code{downfrom} with no arguments, then the default is to decrease the
+variable by one at each step. @code{to} implies that the LIMIT is inclusive
+and must happen during the iteration, @code{upto} implies that only the values
+strictly less then LIMIT can happen during iteration, @code{below} implies
+that the values below the limit as well as the limit itself will happen during
+the iteration.
+
+@example
+(++ (for i from 0 to 10) (message "i: %s" i))
+@end example
+
+This example will iterate over values 0..10 inclusive and print them
+@c ===========================================================================
+@c End for continuations
+@c ===========================================================================
+
+@node generate
+@section User-provided generators
+
+This feature is not implemented yet.
+
+@node repeat
+@section Repeats the code N times
+
+This driver uses the form of @code{(repeat N)}, where N is the number of
+times to run the body of the macro.
+
+@example
+(++ (repeat 100) (message "Hello, world!"))
+@end example
+
+This example will print the line ``Hello, world'' 100 times.
+
+@node with
+@section Variable declaration
+
+This driver is very similar to @code{let*} in effect. It allows you
+to declare variables you can use later inside other drivers. It can
+be particularly useful when you need to initialize the variables you
+are collecting into with some values, before the first collection can
+occur.
+
+@example
+(++ (with ((a (let ((x 0)) 
+                (map 'vector (lambda (y) (+ y (incf x)))
+                     (make-vector 10 0))))
+           (b 100) c))
+  (for i across a)
+  (message "b - i: %s, c: %s" (- b i) c))
+@end example
+
+This example initializes the variable @code{a} to be an array of a length
+of 100 and loops over the values in the created array.
+
+@comment Keyword nodes
 
 @comment Keyword nodes
 @node Keywords
@@ -422,8 +428,8 @@ all belong in this group.
 * next::     Gives the value of the variable from the next iteration.
 * output::   Prints the variable to the dedicated stream.
 * insert::   Generates a vector and inserts elements into it.
-* minimize:: Finds the minimum value of the variable.
-* maximize:: Finds the maximum value of the variable.
+* maximize:: Finds the laregest value of the variable.
+* minimize:: Finds the smallest value of the variable.
 * count::    Counts the number to times this expression was executed.
 * sum::      Sums the values of this variable.
 * multiply:: Multiplies the values of this variable.
@@ -548,23 +554,14 @@ This keyword finds the largest value of a variable.
 This feature is not implemented yet.
 
 @node count
-@section Count the number of times this keyword ran
+@section Counts the number to times this expression was executed
 
 This keyword counts the number of times it was executed.
 
 This feature is not implemented yet.
 
-@node reduce
-@section A general accumulation keyword
-
-This keyword requires a user-provided function, which will then be called
-with two arguments, the first being the output of the previous call to the
-function and the second is the current value of the variable.
-
-This feature is not implemented yet.
-
 @node sum
-@section Sums the values of the variable
+@section Sums the values of this variable
 
 This keyword sums all the values of the variable
 
@@ -574,6 +571,15 @@ This feature is not implemented yet.
 @section Multiplies the values of the variable
 
 This keyword multiplies all the values of the variable
+
+This feature is not implemented yet.
+
+@node reduce
+@section General purpose accumulation handler
+
+This keyword requires a user-provided function, which will then be called
+with two arguments, the first being the output of the previous call to the
+function and the second is the current value of the variable.
 
 This feature is not implemented yet.
 

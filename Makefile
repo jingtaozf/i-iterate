@@ -3,21 +3,29 @@
 
 PACKAGE = i-iterate
 DOCDST = ${PACKAGE}/docs
+HTMLDOCDST = ${PACKAGE}/html-docs
 DOCSRC = ${PACKAGE}/info
 IC = makeinfo
 ICO = --force
+HTML = texi2html
+HTMLO = --split section --use-nodes
 TEXI = $(wildcard $(DOCSRC)/*.texi)
 INFO = $(addprefix $(DOCDST)/,$(notdir $(TEXI:.texi=.info)))
 
 $(DOCDST)/%.info: $(DOCSRC)/%.texi
 	$(IC) $(ICO) -o $@ $<
+	$(HTML) $(HTMLO) $<
 
-default: prepare byte-compile $(INFO)
+default: prepare $(INFO) move-html byte-compile
 	cp -r lisp info Makefile README i-pkg.el ${PACKAGE}
+
+move-html:
+	mv *.html ${HTMLDOCDST}/
 
 prepare:
 	mkdir -p ${PACKAGE}
 	mkdir -p ${DOCDST}
+	mkdir -p ${HTMLDOCDST}
 
 byte-compile:
 	emacs -Q -L ./lisp -batch -f batch-byte-compile ./lisp/*.el
