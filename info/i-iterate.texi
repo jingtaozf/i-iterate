@@ -45,14 +45,14 @@ If you found bugs or want a particular feature, you can contact the author
 
 @strong{Rationale}
 
-Iteration is one of the most basic and most common tasks a programmer will
-perform is facing when writing programs of any complexity. Some iteration
-patterns are more common then others, but when facing a less trivial task
+Iteration is one of the most common tasks a programmer will
+be facing when writing programs of any complexity. Some iteration
+patterns are more common then others, but when facing a less common task
 a programmer would have to re-invent the strategy for solving it. Having
 these, or just more of these strategies ``canned'' would be thus helpful
-for hiding the technical details of the strategy and concentrating on the
-particular task that needs to be addressed.
-As an example, you can thing of a task of iterating over the characters
+for reducing the amount of work and to allow the programmer to better
+concentrate on the purpose on the program, rather then the technical details.
+As an example, you can think of a task of iterating over the characters
 of a string in reverse order. 
 
 @example
@@ -64,10 +64,10 @@ of a string in reverse order.
 @end example
 
 Notice that in order to do so, you had to create a ``technical'' variable
-@code{iterator} and to perform many routine operations that increase the
+@code{iterator} and to perform many ``boring'' operations that increase the
 verbosity of your code, hiding the intention.
 
-Compare this to the @code{++} macro for the similar task:
+Compare this to the @code{++} macro for the same task:
 
 @example
 (++ (for i reverse "input")
@@ -80,8 +80,8 @@ know about the code.
 
 @strong{General Concepts}
 
-The @code{++} macro creates a special environment, where you code is expanded.
-In this environment, it introduces a number of constructs it interprets in
+The @code{++} macro creates special environment, where your code is expanded.
+In this environment, it declares a number of constructs it interprets in
 a particular way. Two major categories of these constructs are the
 @strong{drivers} and @strong{keywords}. Drivers can only occur at the
 top-level definition, while keywords are generally allowed everywhere, unless
@@ -95,7 +95,7 @@ otherwise specified.
 @node Drivers
 @chapter The top-level forms driving the iteration
 
-Drivers are the s-expression that describe iterative tasks. They usually
+Drivers are the s-expressions that describe iterative tasks. They usually
 begin with the prefix, that describes the purpose of the driver, which then
 can be followed by either the variables this driver operates on, the symbols
 that describe details about the action performed by the driver, and, some times
@@ -464,7 +464,7 @@ it is automatically declared.
 @end example
 
 The example above iterates over two hash-tables simultaneously and collects
-@code{(max 100 120)} conses, prints the collected keys and values, and
+@code{(min 100 120)} conses, prints the collected keys and values, and
 returns what was collected.
 
 @node hash
@@ -526,7 +526,7 @@ buffers to generate several strings at the same time.
 This example will print all even numbers into a @code{result}.
 
 @node insert
-@section Collect values and insert them into an array
+@section Collect values and insert them into array
 
 This keyword is very similar to @code{collect}, but it uses array as
 its destination.
