@@ -7,31 +7,42 @@ HTMLDOCDST = ${PACKAGE}/html-docs
 DOCSRC = ${PACKAGE}/info
 IC = makeinfo
 ICO = --force
-HTML = texi2html
-HTMLO = --split section --use-nodes
+TEXI2HTML = texi2html
+TEXI2HTMLO = --split section --use-nodes
+HTML2WIKI = html2wiki
+HTML2WIKIO = --dialect GoogleCode
 TEXI = $(wildcard $(DOCSRC)/*.texi)
 INFO = $(addprefix $(DOCDST)/,$(notdir $(TEXI:.texi=.info)))
+WIKIDST = ../wiki
+HTML = $(wildcard $(HTMLDOCDST)/*.html)
+WIKI = $(addprefix $(WIKIDST)/,$(notdir $(HTML:.html=.wiki)))
 
 $(DOCDST)/%.info: $(DOCSRC)/%.texi
 	$(IC) $(ICO) -o $@ $<
-	$(HTML) $(HTMLO) $<
+	$(TEXI2HTML) $(TEXI2HTMLO) $<
 
-default: prepare $(INFO) move-html byte-compile
+$(WIKIDST)/%.wiki: $(HTMLDOCDST)/%.html
+	$(HTML2WIKI) $(HTML2WIKIO) $< > $@
+
+default: prepare $(INFO) move-html $(WIKI) byte-compile
 	cp -r lisp info Makefile README i-pkg.el ${PACKAGE}
-
-move-html:
-	mv *.html ${HTMLDOCDST}/
 
 prepare:
 	mkdir -p ${PACKAGE}
 	mkdir -p ${DOCDST}
 	mkdir -p ${HTMLDOCDST}
 
+move-html:
+	rm -f ${HTMLDOCDST}/*.html
+	$(shell find ./ -maxdepth 1 -name "*.html" > /dev/null || \
+mv -f *.html ${HTMLDOCDST}/)
+
 byte-compile:
 	emacs -Q -L ./lisp -batch -f batch-byte-compile ./lisp/*.el
 
 clean:
 	rm -f ./lisp/*.elc
+	rm -f ./*.html
 	rm -rf ${DOCDST}
 	rm -rf ${PACKAGE}
 
