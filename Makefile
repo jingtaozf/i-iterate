@@ -44,6 +44,8 @@ rename-wiki:
 	$(shell cd ${WIKIDST} && rename 'i-iterate' 'Iterate' *.wiki)
 	$(shell find ${WIKIDST} -name "*.wiki" -exec \
 sed -i 's/\[i-iterate/\[Iterate/g' '{}' \;)
+	$(shell find ${WIKIDST} -name "*.wiki" -exec \
+sed -i 's/\.html\#SEC/\#SEC/g' '{}' \;)
 
 byte-compile:
 	emacs -Q -L ./lisp -batch -f batch-byte-compile ./lisp/*.el
