@@ -45,7 +45,7 @@ rename-wiki:
 	$(shell find ${WIKIDST} -name "*.wiki" -exec \
 sed -i 's/\[i-iterate/\[Iterate/g' '{}' \;)
 	$(shell find ${WIKIDST} -name "*.wiki" -exec \
-sed -i 's/\.html\#SEC/\#SEC/g' '{}' \;)
+sed -i 's/\.html\#/\#/g' '{}' \;)
 
 byte-compile:
 	emacs -Q -L ./lisp -batch -f batch-byte-compile ./lisp/*.el
