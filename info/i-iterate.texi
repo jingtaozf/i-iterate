@@ -1,7 +1,7 @@
 \input texinfo @c -*-texinfo-*-
 @c %**start of header
 @setfilename i-iterate.info
-@settitle Macro system for iterting
+@settitle Macro system for iterating
 @c %**end of header
 
 @copying
@@ -26,7 +26,7 @@ provided the copyright notice and this notice are preserved.
 @contents
 
 @ifnottex
-@node Top, for, (dir), (dir)
+@node Top
 @top i-iterate developer documentation
 
 @insertcopying
@@ -34,7 +34,7 @@ provided the copyright notice and this notice are preserved.
 
 i-iterate is a macro system inspired by the Common Lisp
 @url{http://common-lisp.net/project/iterate, iterate} package. However it
-deliberately adds, omitts or renames parts of the macro, such as to make
+deliberately adds, omits or renames parts of the macro, such as to make
 it more applicable in the context of Emacs Lisp.
 
 The homepage (the code repository, actually) can be found
@@ -80,45 +80,54 @@ know about the code.
 
 @strong{General Concepts}
 
-The @code{++} macro creates a sepcial envirnoment, where you code is expanded.
+The @code{++} macro creates a special environment, where you code is expanded.
 In this environment, it introduces a number of constructs it interprets in
 a particular way. Two major categories of these constructs are the
 @strong{drivers} and @strong{keywords}. Drivers can only occur at the
 top-level definition, while keywords are generally allowed everywhere, unless
 otherwise specified.
 
-@strong{Drivers}
+@menu
+* Drivers::  The top-level forms driving the iteration
+* Keywords:: The forms available inside the iteration
+@end menu
+
+@node Drivers
+@chapter The top-level forms driving the iteration
+
+Drivers are the s-expression that describe iterative tasks. They usually
+begin with the prefix, that describes the purpose of the driver, which then
+can be followed by either the variables this driver operates on, the symbols
+that describe details about the action performed by the driver, and, some times
+the datum.
+
+Example:
+
+@code{(for i in '(1 2 3 4) by #'cddr)}
+
+@code{for} is the prefix, which describes the selection of the driver.
+@code{in} and @code{by} are the symbols that specify how exactly the driver
+should function (@code{in} means it should iterate over @code{car}s and
+@code{by} means it should use the following datum for selecting the next
+list cell.)
+@code{i} is a variable of this driver. Variables record the state of the
+iteration. In this example, @code{i} would be set to 1 and 3.
+@code{#'cddr} is the datum, in the context of this driver it is treated
+as a function to select the next list cell.
+
+@strong{List of available drivers}
 
 @menu 
 * for::       A multi-purpose driver for doing variety of things.
 * with::      A driver for variable declaration.
 * generate::  A general purpose generator driver.
-* repeat::    A simple driver for performing iteration N number of itmes.
+* repeat::    A simple driver for performing iteration N number of items.
 * finally::   A driver that runs when the iteration finishes normally.
 * initially:: A driver that runs before any code in the iteration.
 @end menu
 
-@strong{Keywords}
-
-@menu
-* return::   Returns the control flow to the form outside the loop.
-* collect::  Generates a list with the cells being the experssion given.
-* hash::     Generates a hash-table with the provided keys and values.
-* skip::     Skips the execution of the rest of the loop body.
-* previous:: Gives the value of the variable from the previous iteration.
-* next::     Gives the value of the variable from the next iteration.
-* output::   Prints the variable to the dedicated stream.
-* insert::   Generates a vector and inserts elements into it.
-* minimize:: Finds the minimum value of the variable.
-* maximize:: Finds the maximum value of the variable.
-* count::    Counts the number ot times this expression was executed.
-* sum::      Sums the values of this variable.
-* multiply:: Multiplies the values of this variable.
-* reduce::   General purpose accumulation handler.
-@end menu
-
 @node for
-@chapter Multi-purpose driver
+@section Multi-purpose driver
 
 This driver can perform many different task. Each of these tasks usually
 has it's own continuation. Below is the list of the existing (or planned)
@@ -130,9 +139,8 @@ continuations. For examples of how to implement your own continuation see
 @strong{For continuations}
 
 @menu
-
 * in on::                     Iterates over lists.
-* upfrom from downfrom::      Iterates numberically.
+* upfrom from downfrom::      Iterates numerically.
 * across reverse binary::     Iterates over arrays.
 * depth-first breadth-first:: Iterates over trees.
 * keys values pairs::         Iterates over hash-tables.
@@ -140,11 +148,10 @@ continuations. For examples of how to implement your own continuation see
 * chars words lines::         Iterates over entities in buffer.
 * permutations::              Generates permutation of an array.
 * dot-product join distinct:: Iterates over sets.
-
 @end menu
 
-@node with, generate, for, Top
-@chapter Variable declaration
+@node with
+@section Variable declaration
 
 This driver is very similar to @code{let*} in effect. It allows you
 to declare variables you can use later inside other drivers. It can
@@ -164,13 +171,13 @@ occur.
 This example initializes the variable @code{a} to be an array of a length
 of 100 and loops over the values in the created array.
 
-@node generate, repeat, with, Top
-@chapter User-provided generators
+@node generate
+@section User-provided generators
 
 This feature is not implemented yet.
 
-@node repeat, finally, generate, Top
-@chapter Repeats the code N times
+@node repeat
+@section Repeats the code N times
 
 This driver uses the form of @code{(repeat N)}, where N is the number of
 times to run the body of the macro.
@@ -181,8 +188,8 @@ times to run the body of the macro.
 
 This example will print the line ``Hello, world'' 100 times.
 
-@node finally, initially, repeat, Top
-@chapter Runs the epilogue code
+@node finally
+@section Runs the epilogue code
 
 This driver is executed after the iteration had finished in a regular way.
 The syntax of this driver is @code{(finally EXPRESSION)} where EXPRESSION
@@ -196,17 +203,17 @@ is any Lisp code.
 
 This example will print ``1, 4, 7, 10, 26''
 
-@node initially, return, finally, Top
-@chapter Runs the prologue code
+@node initially
+@section Runs the prologue code
 
 This driver is not implemented yet
 
 @comment Keyword nodes
 
-@node in on, upfrom from downfrom, for, for
-@chapter Iterates over lists
+@node in on
+@subsection Iterates over lists
 
-This for continuation uses the sintax @code{(for VARIABLES in|on [by ITERATOR])}
+This for continuation uses the syntax @code{(for VARIABLES in|on [by ITERATOR])}
 @code{VARIABLES} are interpreted as follows:
 If it is a symbol, it names a variable, if the continuation is @code{in}, then
 it points to @code{car} of the list cell being iterated, it points to the list
@@ -235,12 +242,12 @@ This example will set @code{i} to (1 2 3 4), (2 3 4), (3 4), (4) in turns, and
 if the value of @code{(car i)} happens to be odd, will terminate the iteration
 and return that value multiplied by 7. Since 1 is odd, the value returned is 7.
 
-@node upfrom from downfrom, across reverse binary, in on, for
-@chapter Numerical iteration
+@node upfrom from downfrom
+@subsection Numerical iteration
 
 This continuation uses this syntax:
 @code{(for VARIABLE from|downfrom|upfrom [to|upto|below LIMIT [by STEP]])}.
-Where VARIABLE is a variable set to the subsequent producs of the iteration.
+Where VARIABLE is a variable set to the subsequent products of the iteration.
 @code{from} and @code{upfrom} are synonymous. If you use @code{from} with no
 further arguments, then the default is to iterate by one upwards, and if you
 use @code{downfrom} with no arguments, then the default is to decrease the
@@ -256,8 +263,8 @@ the iteration.
 
 This example will iterate over values 0..10 inclusive and print them.
 
-@node across reverse binary, depth-first breadth-first, upfrom from downfrom, for
-@chapter Iterate over arrays
+@node across reverse binary
+@subsection Iterate over arrays
 
 This continuation can take following forms:
 @code{(for VARIABLES across|reverse|binary ARRAY)}, where VARIABLES can be
@@ -276,11 +283,11 @@ body expression are run inside the innermost loop.
 This example will iterate over the elements of @code{[1 2 3 4]} array and
 print them.
 
-@node depth-first breadth-first, keys values pairs, across reverse binary, for
-@chapter Iterate over trees
+@node depth-first breadth-first
+@subsection Iterate over trees
 
-As the name suggests, these drivers iterate over trees in eithr depth-first
-or breadh-first order (both happen linearly, no recursion involved). These
+As the name suggests, these drivers iterate over trees in either depth-first
+or breadth-first order (both happen linearly, no recursion involved). These
 drivers use syntax: @code{(for VARIABLE depth-first|breadth-first TREE)}.
 The VARIABLE is set to leafs only in either case.
 
@@ -293,13 +300,13 @@ The VARIABLE is set to leafs only in either case.
 This example will print ``i: 1, i: 2, i: 3, i: 4, i: 5, i: 6, i: 7, i: 8,
 i: 9, i: 10, i: 11''.
 
-@node keys values pairs, random, depth-first breadth-first, for
-@chapter Iterate over hash-table
+@node keys values pairs
+@subsection Iterate over hash-table
 
 This driver iterates over hash-table, it is possible to iterate only over
 the keys, the values, or both. The syntax used is:
 @code{(for VARIABLES keys|values|pairs HASH-TABLE)}, where VARIABLES can
-be either a symbo, in which case it will be set to whichever continuatio
+be either a symbol, in which case it will be set to whichever continuation
 you choose, or a list of two symbols. In the later case, the first element
 of the list is taken to be the variable for keys, and the second is the
 variable for values.
@@ -311,11 +318,11 @@ variable for values.
 @end example
 
 This example will iterate over a hash-table @code{test-hash} and collect
-its keys into an alist, with keys bein the in the @code{car} position and
+its keys into an alist, with keys being the in the @code{car} position and
 values being in @code{cdr} position.
 
-@node random, chars words lines, keys values pairs, for
-@chapter Generate N unique random numbers
+@node random
+@subsection Generate N unique random numbers
 
 This continuation will generate unique random numbers during iteration,
 it uses syntax: @code{(for VARIABLE random LOW to HIGH)}, where
@@ -335,8 +342,8 @@ containing only ``-'' characters, but being randomly replaced by ``x''
 character. The last line should be entirely replaced with ``x''
 characters.
 
-@node chars words lines, permutations, random, for
-@chapter Iterate over characters, words or lines in a buffer
+@node chars words lines
+@subsection Iterate over characters, words or lines in a buffer
 
 This continuation iterates over characters, words or lines using
 Emacs navigation commands, @code{forward-char}, @code{forward-word}
@@ -356,19 +363,19 @@ This example will switch to the ``*scratch*'' buffer and will then
 print every word from the current point position and until the end
 of the buffer.
 
-@node permutations, dot-product join distinct, chars words lines, for
-@chapter Produce permutations of an array
+@node permutations
+@subsection Produce permutations of an array
 
 This continuation will produce all permutations (without repeating
 them) of an array by swapping array elements. This continuation
-uses syntax: @code{(for VARIABLE permutations ARRAY [algo ALGORYTM])},
+uses syntax: @code{(for VARIABLE permutations ARRAY [algo ALGORITHM])},
 where VARIABLE is set to ARRAY. ARRAY is updated on every iteration
-and, optionally, you can choose an algoritm. The default algorithm
+and, optionally, you can choose an algorithm. The default algorithm
 used is the ``quickperm'', borrowed from @url{http://www.quickperm.org/}
 Which is a simpler and a more efficient one. And a ``johnson-trotter''
-algoritm, borrowed from
+algorithm, borrowed from
 @url{http://en.wikipedia.org/wiki/Steinhaus%E2%80%93Johnson%E2%80%93Trotter_algorithm}.
-The distinction is that the later one will swap adjusent elements
+The distinction is that the later one will swap adjacent elements
 while the former will swap any two elements each iteration.
 
 Please note that the syntax of this continuation will probably
@@ -382,15 +389,49 @@ change in the future.
 This example will generate all 24 permutations of the
 @code{[1 2 3 4]} array.
 
-@node dot-product join distinct, , permutations, for
-@chapter Iterate over sets
+@node dot-product join distinct
+@subsection Iterate over sets
 
 These continuations aren't implemented yet.
 
 @comment Keyword nodes
+@node Keywords
+@chapter The forms available inside the iteration
 
-@node return, collect, initially, Top
-@chapter Unconditionally terminate the iteration
+These forms may serve various purposes, which can be grouped as follows:
+@table @code
+@item accumulators
+Forms that accumulate values produced by a driver, @code{collect}, @code{hash},
+@code{output}, @code{insert} and @code{reduce} belong in this group.
+@item control flow
+Forms that affect how the iteration is performed. They can ``fast-forward'' it
+or retrieve a value from the previous state etc. @code{return}, @code{skip},
+@code{previous} and @code{next} belong in this group.
+@item counting
+This group performs arithmetic on subsequent states of the iteration.
+@code{sum}, @code{multiply}, @code{maximize}, @code{minimize} and @code{count}
+all belong in this group.
+@end table
+
+@menu
+* return::   Returns the control flow to the form outside the loop.
+* collect::  Generates a list with the cells being the expression given.
+* hash::     Generates a hash-table with the provided keys and values.
+* skip::     Skips the execution of the rest of the loop body.
+* previous:: Gives the value of the variable from the previous iteration.
+* next::     Gives the value of the variable from the next iteration.
+* output::   Prints the variable to the dedicated stream.
+* insert::   Generates a vector and inserts elements into it.
+* minimize:: Finds the minimum value of the variable.
+* maximize:: Finds the maximum value of the variable.
+* count::    Counts the number to times this expression was executed.
+* sum::      Sums the values of this variable.
+* multiply:: Multiplies the values of this variable.
+* reduce::   General purpose accumulation handler.
+@end menu
+
+@node return
+@section Unconditionally terminate the iteration
 
 This keyword is similar to @code{break} in C language. It will unconditionally
 terminate the iteration and return the value. The syntax is:
@@ -404,14 +445,14 @@ terminate the iteration and return the value. The syntax is:
 This example will iterate starting at 100 and decreasing the value by 5. Once
 the value is less then 75, it will return it (i.e. it will return 70).
 
-@node collect, hash, return, Top
-@chapter Collect values into a list
+@node collect
+@section Collect values into a list
 
 This keyword will accumulate values into a list, and, unless @code{finally}
 driver is given, will return the generated list. The syntax of this keyword
 is @code{(collect EXPRESSION [into VARIABLE])}, where EXPRESSION is any
 Lisp form, and optional variable is the destination. You may declare this
-variable with @code{with} driver to be able to initialize it before anny
+variable with @code{with} driver to be able to initialize it before any
 collection happens. If you don't declare the variable until @code{collect},
 it is automatically declared.
 
@@ -426,8 +467,8 @@ The example above iterates over two hash-tables simultaneously and collects
 @code{(max 100 120)} conses, prints the collected keys and values, and
 returns what was collected.
 
-@node hash, skip, collect, Top
-@chapter Collects values into a hash-table
+@node hash
+@section Collects values into a hash-table
 
 In a way very similar to @code{collect} collects values into a hash-table.
 Similarly, you can declare the hash-table before any call to @code{hash}
@@ -439,35 +480,35 @@ takes place. @code{(hash KEY VALUE [into VARIABLE])}.
   (message "i: %s" i))
 @end example
 
-The example code will decreas the initial value 10 by 2 until it is less
+The example code will decrease the initial value 10 by 2 until it is less
 then -10, and collect it into a hash table, where values are twice the keys.
 Finally, it will return the populated hash-table.
 
-@node skip, previous, hash, Top
-@chapter Skip the rest of the iteration body
+@node skip
+@section Skip the rest of the iteration body
 
 This keyword instructs to skip the iteration body and re-enter the
 iteration. This is very similar to @code{continue} keyword in C language.
 
 This feature is not implemented yet.
 
-@node previous, next, skip, Top
-@chapter Retrieve the previous value of the variable
+@node previous
+@section Retrieve the previous value of the variable
 
 This keyword retrieves the value of the variable at the previous iteration
 
 This feature is not implemented yet.
 
-@node next, output, previous, Top
-@chapter Advance the iteration and retrieve the value of the variable
+@node next
+@section Advance the iteration and retrieve the value of the variable
 
-This keywords advances the iteration number of cycles to retrieve the nex
+This keywords advances the iteration number of cycles to retrieve the next
 value of the variable.
 
 This feature is not implemented yet.
 
-@node output, insert, next, Top
-@chapter Generate string
+@node output
+@section Generate string
 
 This keyword acts very much like @code{with-output-to-string}, in the loop
 it binds ``standard-output'' to a buffer variable, where it collects the
@@ -484,37 +525,37 @@ buffers to generate several strings at the same time.
 
 This example will print all even numbers into a @code{result}.
 
-@node insert, maximize, output, Top
-@chapter Collect values and insert them into an array
+@node insert
+@section Collect values and insert them into an array
 
 This keyword is very similar to @code{collect}, but it uses array as
-its destinaion.
+its destination.
 
 This feature is not implemented yet.
 
-@node maximize, minimize, insert, Top
-@chapter Find the largest value of a variable
+@node maximize
+@section Find the largest value of a variable
 
 This keyword finds the maximum value of a variable.
 
 This feature is not implemented yet.
 
-@node minimize, count, maximize, Top
-@chapter Find the smallest value of a variable
+@node minimize
+@section Find the smallest value of a variable
 
 This keyword finds the largest value of a variable.
 
 This feature is not implemented yet.
 
-@node count, reduce, minimize, Top
-@chapter Count the number of times this keyword ran
+@node count
+@section Count the number of times this keyword ran
 
 This keyword counts the number of times it was executed.
 
 This feature is not implemented yet.
 
-@node reduce, sum, count, Top
-@chapter A general accumulation keyword
+@node reduce
+@section A general accumulation keyword
 
 This keyword requires a user-provided function, which will then be called
 with two arguments, the first being the output of the previous call to the
@@ -522,15 +563,15 @@ function and the second is the current value of the variable.
 
 This feature is not implemented yet.
 
-@node sum, multiply, reduce, Top
-@chapter Sums the values of the variable
+@node sum
+@section Sums the values of the variable
 
 This keyword sums all the values of the variable
 
 This feature is not implemented yet.
 
-@node multiply, , sum, Top
-@chapter Multiplies the values of the variable
+@node multiply
+@section Multiplies the values of the variable
 
 This keyword multiplies all the values of the variable
 
