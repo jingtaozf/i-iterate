@@ -172,7 +172,7 @@ the actual expansion."
 (ert-deftest i-test-for-across-symbol ()
   "Tests the expansion of `i-iterate' macro, (for * across **) driver."
   (expansion-equals
-   (i-iterate (for i across [1 2 3 4]) (message "i: %d" i))
+   (++ (for i across [1 2 3 4]) (message "i: %d" i))
    (let* ((--0 [1 2 3 4]) (--1 0) i)
      (while (< --1 (length --0))
        (setq i (aref --0 --1))
@@ -544,5 +544,24 @@ of `i-iterate' macro."
           (t (message "i: %s" i)))
          (setq --1 (cdr --1)))
        (setq --1 --2)))))
+
+(ert-deftest i-test-for-from-to-skip ()
+  "Tests the expansion of (for * from ** to ***) in combination
+with (skip) keyword of `i-iterate' macro."
+  (expansion-equals
+   (++ (for i from 0 to 10)
+     (when (oddp i) (skip))
+     (message "0 printing i: %s" i)
+     (message "1 printing i: %s" i)
+     (message "2 printing i: %s" i))
+   (let* ((i 0))
+     (while (<= i 10)
+       (catch (quote --0)
+         (if (oddp i)
+             (throw (quote --0) (incf i)))
+         (message "0 printing i: %s" i)
+         (message "1 printing i: %s" i)
+         (message "2 printing i: %s" i)
+         (incf i))))))
 
 ;;; i-test.el ends here.

@@ -42,14 +42,9 @@ mv -f *.html ${HTMLDOCDST}/)
 
 rename-wiki:
 	$(shell cd ${WIKIDST} && rename 'i-iterate' 'Iterate' *.wiki)
-	$(shell find ${WIKIDST} -name "*.wiki" -exec \
-sed -i 's/\[i-iterate/\[Iterate/g' '{}' \;)
-	$(shell find ${WIKIDST} -name "*.wiki" -exec \
-sed -i 's/\.html\#/\#/g' '{}' \;)
-	$(shell find ${WIKIDST} -name "*.wiki" -exec \
-sed -i 's/&lt;/\</g' '{}' \;)
-	$(shell find ${WIKIDST} -name "*.wiki" -exec \
-sed -i 's/&gt;/\>/g' '{}' \;)
+	$(shell find ${WIKIDST} -name "*.wiki" -exec sed -i \
+'s/\[i-iterate/\[Iterate/g;s/\.html\#/\#/g;s/&lt;/\</g;s/&gt;/\>/g' \
+'{}' \;)
 
 byte-compile:
 	emacs -Q -L ./lisp -batch -f batch-byte-compile ./lisp/*.el

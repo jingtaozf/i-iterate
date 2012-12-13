@@ -42,9 +42,6 @@
 ;; (for * all-distinct ** by ***) - like joined, but only for distinct values
 ;; like distinct, but all pairs must fail comparison
 ;;
-;; (for * random ** to ***) - generates random values in range ** to ***. This
-;; driver doesn't have an exit condition
-;;
 ;; (for * gaussian ** to ***) - like random, except that values are choosen
 ;; using Gaussian distribution (standard deviation).
 ;;
@@ -60,10 +57,6 @@
 ;; consequently sets * to next combination of **
 ;; optionally limiting the number of places to ***
 ;;
-;; (for * permutations ** of ***)
-;; consequently sets * to next combination of **
-;; optionally limiting the number of spaces to ***
-;;
 ;; (for * binary ** check ***)
 ;; - like across, but moves in halves the length. check
 ;; is the function to apply to successive elements, must return negative
@@ -76,15 +69,10 @@
 ;; (for * shuffle **)
 ;; - like across, but choses unique random elements at each iteration.
 ;;
-;; (for (line|char|word) * (file|buffer) **)
-;; - set * to be the line, word or char of the **
-;; (either file or buffer)
-;;
 ;; (generate * **)
 ;; - generates * by calling ** with last value of * bein the argument.
 ;; if * is a list, then multiple-value-call is used rather then regular call.
 ;;
-;; (with *) - just a declaration and initial values for variables.
 ;; (initially *) - execute any code before starting the iteration.
 ;; 
 ;; (minimize * into **)
@@ -97,7 +85,6 @@
 ;; (concatenate * into **)
 ;; - concatenate * (must be lists), optionally set ** to the result
 ;;
-;; (return *) - unconditionally stop the iteration and return *
 ;; (skip **)
 ;; - don't execute the rest of the body and move to the beginning of the loop.
 ;; execute ** (if present) before returning to the beginning of the loop.
@@ -321,7 +308,8 @@ Use `i-add-for-handler' if you need to add your own driver")
 (defvar i-expanders '((collect . i--parse-collect)
                       (hash . i--parse-hash)
                       (output . i--parse-output)
-                      (return . i--parse-return))
+                      (return . i--parse-return)
+                      (skip . i--parse-skip))
   "The expanders used in the nested forms in the `i-iterate' macro")
 
 (defvar i-prefix-handlers '((repeat . i--parse-repeat)
@@ -1201,18 +1189,32 @@ after the loop terminates normally."
     result-exp))
 
 (defmethod i-generate-break ((this i-spec) exp)
-  "Generates a (throw last-in-the-loop exp) block and runs the epilogue.
-Will set `break-condition' if it wasn't previously set."
+  "Generates a (throw last-in-the-loop exp) block and exit outside the
+loop. Will set `break-condition' if it wasn't previously set."
   (let ((catch-marker
          (or (oref this break-condition)
              (oset this break-condition (i-gensym this)))))
     `(throw ',catch-marker
             (progn ,(i--expand-in-environment exp)))))
 
+(defmethod i-generate-continue ((this i-spec))
+  "Generates a (throw last-in-the-loop exp) block and runs the epilogue.
+Will set `continue-condition' if it wasn't previously set."
+  (let ((catch-marker
+         (or (oref this continue-condition)
+             (oset this continue-condition (i-gensym this)))))
+    `(throw ',catch-marker --i-epilogue-form)))
+
 (defun i--parse-return (exp &optional spec)
   "Parses the (return ...) expression. This expression unconditionally
 exits the loop body and does not urn the epilogue code."
   (i-generate-break (or spec  i-spec-stack) exp))
+
+(defun i--parse-skip (&optional spec)
+  "Parses the (skip) expression. This expression instructs to skip
+all instructions later in the loop and restart it, incrementing the
+counter."
+  (i-generate-continue (or spec  i-spec-stack)))
 
 (defun i--parse-output (exp &optional spec)
   "Similar to `with-output-to-string' collects all what is printed in
@@ -1403,6 +1405,8 @@ REPLACEMENTS."
             s (cdr s) r (cdr r))) exp))
 
 (defun i--place-unwind-form (exp replacement)
+  "Places `unwind-protect' form if this was required by the generated
+code (if REPLACEMENT is not `nil')."
   (cond
    ((null exp) nil)
    ((and (consp exp) (consp (car exp))
@@ -1416,6 +1420,31 @@ REPLACEMENTS."
           (i--place-unwind-form (cdr exp) replacement)))
    (t exp)))
 
+(defun i--place-continue-form (exp replacement)
+  "Inserts (catch REPLACEMENT ...) instead of --i-continue-condition
+symbol, when REPLACEMENT is not `nil', otherwise simply removes the
+symbol."
+  (cond
+   ((null exp) nil)
+   ((and (consp exp) (eql (car exp) '--i-continue-condition))
+    (if replacement
+        `((catch ',replacement ,@(cddr exp)))
+      (cdr exp)))
+   ((consp exp)
+    (cons (i--place-continue-form (car exp) replacement)
+          (i--place-continue-form (cdr exp) replacement)))
+   (t exp)))
+
+(defun i--place-continue-in-lambda (exp replacement)
+  "Adds --i-continue-condition as a first element in the given lambda
+expression to be later replaced by the catch block corresponding to
+a continue condition."
+  (if replacement
+      (progn
+        (setcdr (cdr exp) (cons '--i-continue-condition (cddr exp)))
+        exp)
+    exp))
+
 ;;;###autoload
 (defmacro i-iterate (&rest specs)
   ;; TODO: see `(elisp) Indenting Macros' for better indenting.
@@ -1426,94 +1455,106 @@ REPLACEMENTS."
                       has-epilogue-insertion-p init-form
                       break-condition continue-condition) spec
       (i-with-aggregated
-       (exit-conditions variables actions special-actions
-                        epilogue cleanup-actions) spec
-       (let* ((result (when result (append '(progn) result)))
-              (econds
-               (cond
-                ((cdr exit-conditions)
-                 (append '(and) (nreverse exit-conditions)))
-                (exit-conditions (car exit-conditions))
-                (t t)))
-              (vars (nreverse variables))
-              (break-form
-               (when (oref spec break-condition)
-                 `(when (or ,@(oref spec break-condition-triggers))
-                    (throw ',(oref spec break-condition) --i-result-form))))
-              (mandatory-block
-               (cond
-                ((null hash-drivers)
-                 `(--i-init-form
-                   (while ,econds
-                     ,@(when special-actions '(--i-special-actions-form))
-                     ,@(unless has-actions-insertion-p
-                         '(--i-actions-form))
-                     ,@(unless has-body-insertion-p '(--i-body-form))
-                     ,@(unless has-epilogue-insertion-p
-                         '(--i-epilogue-form)))))
-                ((cdr hash-drivers)     ; TODO: Too much reversing here
-                                        ; need to cache some of it
-                 (let ((additional-vars
-                        (reduce
-                         #'append
-                         (mapcar (lambda (x) (reverse (oref x variables)))
-                                 hash-drivers)))
-                       (additional-actions
-                        (reduce
-                         #'append
-                         (mapcar (lambda (x) (reverse (oref x actions)))
-                                 (cdr (reverse hash-drivers))))))
-                   (setq vars (append additional-vars vars))
-                   (setq actions (append additional-actions actions))
+       (exit-conditions
+        variables actions special-actions
+        epilogue cleanup-actions) spec
+        (let* ((result (when result (append '(progn) result)))
+               (econds
+                (cond
+                 ((cdr exit-conditions)
+                  (append '(and) (nreverse exit-conditions)))
+                 (exit-conditions (car exit-conditions))
+                 (t t)))
+               (vars (nreverse variables))
+               (break-form
+                (when (oref spec break-condition)
+                  `(when (or ,@(oref spec break-condition-triggers))
+                     (throw ',(oref spec break-condition) --i-result-form))))
+               (mandatory-block
+                (i--place-continue-form
+                 (cond
+                  ((null hash-drivers)
                    `(--i-init-form
-                     (maphash
-                      ,(car (reverse (oref (car (reverse hash-drivers))
-                                           actions)))
-                              ,(oref (car (reverse hash-drivers)) table)))))
-                (t                      ; We have a single hash-driver
+                     (while ,econds
+                       ,@(when continue-condition '(--i-continue-condition))
+                       ,@(when special-actions '(--i-special-actions-form))
+                       ,@(unless has-actions-insertion-p
+                           '(--i-actions-form))
+                       ,@(unless has-body-insertion-p '(--i-body-form))
+                       ,@(unless has-epilogue-insertion-p
+                           '(--i-epilogue-form)))))
+                  ((cdr hash-drivers)    ; TODO: Too much reversing here
+                                        ; need to cache some of it
+                   (let ((additional-vars
+                          (reduce
+                           #'append
+                           (mapcar (lambda (x) (reverse (oref x variables)))
+                                   hash-drivers)))
+                         (additional-actions
+                          (reduce
+                           #'append
+                           (mapcar (lambda (x) (reverse (oref x actions)))
+                                   (cdr (reverse hash-drivers))))))
+                     (setq vars (append additional-vars vars))
+                     (setq actions (append additional-actions actions))
+                     `(--i-init-form
+                       (maphash          ; This must be a (lambda X ...)
+                                        ; form, so if there was a continue
+                                        ; condition, we need to replace it
+                                        ; with (lambda X (catch ...)) thing
+                        ,(i--place-continue-in-lambda
+                          (car (reverse (oref (car (reverse hash-drivers))
+                                              actions)))
+                          (when continue-condition '--i-continue-condition))
+                        ,(oref (car (reverse hash-drivers)) table)))))
+                  (t                     ; We have a single hash-driver
                                         ; so we need to remove it's actions
                                         ; from `actions' and place them here
-                 (let* ((hd (car hash-drivers))
-                        (hactions (oref hd actions))
-                        (htable (oref hd table)))
-                   (setq vars (append (oref hd variables) vars))
-                   `(--i-init-form
-                     (maphash ,(car (reverse hactions)) ,htable)))))))
-         (i--remove-surplus-progn
-          (i--replace-non-nil-multi
-           (i--place-unwind-form
-            (cond
-             ((and break-condition vars)
-              `(progn
-                 (let* (,@vars)
-                   (--i-unwind-form
-                    (catch ',break-condition ,@mandatory-block
-                           ,@(unless break-form '(--i-result-form)))))))
-             (break-condition
-              `(progn
-                 (--i-unwind-form
-                  (catch ',break-condition (,@mandatory-block)
-                         ,@(unless break-form '(--i-result-form))))))
-             (variables
-              `(let* (,@vars)
-                 (--i-unwind-form
-                  ,@mandatory-block
-                  ,@(unless break-form '(--i-result-form)))))
-             (t `(progn
-                   (--i-unwind-form
-                    ,@mandatory-block 
-                    ,@(unless break-form '(--i-result-form))))))
-            cleanup-actions)
-           '(--i-special-actions-form
-             --i-actions-form
-             --i-body-form
-             --i-init-form
-             --i-break-form --i-result-form --i-epilogue-form)
-           (list (append '(progn) special-actions)
-                 (append '(progn) actions)
-                 (append '(progn) (reverse body))
-                 init-form break-form result
-                 (append '(progn) epilogue)))))))))
+                   (let* ((hd (car hash-drivers))
+                          (hactions (oref hd actions))
+                          (htable (oref hd table)))
+                     (setq vars (append (oref hd variables) vars))
+                     `(--i-init-form
+                       (maphash
+                        ,(i--place-continue-in-lambda
+                          (car (reverse hactions))
+                          (when continue-condition '--i-continue-condition))
+                        ,htable))))) continue-condition)))
+          (i--remove-surplus-progn
+           (i--replace-non-nil-multi
+            (i--place-unwind-form
+             (cond
+              ((and break-condition vars)
+               `(progn
+                  (let* (,@vars)
+                    (--i-unwind-form
+                     (catch ',break-condition ,@mandatory-block
+                            ,@(unless break-form '(--i-result-form)))))))
+              (break-condition
+               `(progn
+                  (--i-unwind-form
+                   (catch ',break-condition (,@mandatory-block)
+                          ,@(unless break-form '(--i-result-form))))))
+              (variables
+               `(let* (,@vars)
+                  (--i-unwind-form
+                   ,@mandatory-block
+                   ,@(unless break-form '(--i-result-form)))))
+              (t `(progn
+                    (--i-unwind-form
+                     ,@mandatory-block 
+                     ,@(unless break-form '(--i-result-form))))))
+             cleanup-actions)
+            '(--i-special-actions-form
+              --i-actions-form
+              --i-body-form
+              --i-init-form
+              --i-break-form --i-result-form --i-epilogue-form)
+            (list (append '(progn) special-actions)
+                  (append '(progn) actions)
+                  (append '(progn) (reverse body))
+                  init-form break-form result
+                  (append '(progn) epilogue)))))))))
 (defalias '++ 'i-iterate)
 
 (provide 'i-iterate)
