@@ -42,9 +42,6 @@
 ;; (for * all-distinct ** by ***) - like joined, but only for distinct values
 ;; like distinct, but all pairs must fail comparison
 ;;
-;; (for * gaussian ** to ***) - like random, except that values are choosen
-;; using Gaussian distribution (standard deviation).
-;;
 ;; (for * product **) - populates * (variable or a list of)
 ;; with dot-products of **, e.g. (for (x y) product '(1 2) '(3 4))
 ;; will produce:
@@ -309,7 +306,8 @@ Use `i-add-for-handler' if you need to add your own driver")
                       (hash . i--parse-hash)
                       (output . i--parse-output)
                       (return . i--parse-return)
-                      (skip . i--parse-skip))
+                      (skip . i--parse-skip)
+                      (accumulate . i--parse-accumulate))
   "The expanders used in the nested forms in the `i-iterate' macro")
 
 (defvar i-prefix-handlers '((repeat . i--parse-repeat)
@@ -318,7 +316,8 @@ Use `i-add-for-handler' if you need to add your own driver")
                             (hash . i--parse-hash)
                             (output . i--parse-output)
                             (with . i--parse-with)
-                            (finally . i--parse-finally))
+                            (finally . i--parse-finally)
+                            (accumulate . i--parse-accumulate))
   "Top-level handlers used in expansion of `i-iterate' macro")
 
 (defvar i-spec-stack nil
@@ -1133,8 +1132,8 @@ generated with the same name."
 
 (defun i--parse-collect (exp &optional spec)
   "Parses the (collect var &optional into place) expression"
-  (let ((nestedp (not spec))
-        (driver (make-instance 'i-driver))
+  ;; FIXME: location must be declared, if it is something new.
+  (let ((driver (make-instance 'i-driver))
         (spec (or spec  i-spec-stack))
         ;; This looks wrong, we've lost something underway
         (exp (if (consp exp) exp (list exp))))
@@ -1142,15 +1141,69 @@ generated with the same name."
         exp
       (let ((location (or location (i-gensym spec))))
         (oset driver variables `(,location))
-        ;; There's soemthing weird here with unless/when
-        ;; maybe it could be an if?
-        (unless nestedp
-          (oset driver actions
-                `((setq ,location (cons ,form ,location)))))
         (oset spec result `((nreverse ,location)))
         (oset spec drivers (cons driver (oref spec drivers)))
-        (when nestedp
-          `(setq ,location (cons ,form ,location)))))))
+        (car (oset driver actions
+                   `((setq ,location
+                           (cons ,(i--expand-in-environment form)
+                                 ,location)))))))))
+
+(defun i--parse-accumulate (exp &optional spec)
+  "Parses the (collect var accumulator &optional into place) expression"
+  (let ((driver (make-instance 'i-driver))
+        (spec (or spec  i-spec-stack))
+        ;; This looks wrong, we've lost something underway
+        (exp (if (consp exp) exp (list exp))))
+    (destructuring-bind (form accumulator &optional into location)
+        exp
+      (let ((location
+             (cond
+              ;; This is an existing variable
+              ((and location (symbolp location)
+                    (i-has-variable-p spec location))
+               location)
+              ;; Undeclared variable
+              ((and location (symbolp location))
+               (car (oset driver variables (list location))))
+              ;; Location wasn't specified, we are free to create one
+              ((null location)
+               (oset driver variables (i-gensym spec)))
+              ;; This is an error
+              (t (signal 'i-malformed-expression location))))
+            (accumulator
+             (if (i-constexp-p accumulator)
+                 accumulator
+               (let ((acc-sym (i-gensym spec)))
+                 (oset driver variables
+                       (cons `((acc-sym ,accumulator))
+                             (oref driver variables)))
+                 acc-sym))))
+        (oset spec result (list location))
+        (oset spec drivers (cons driver (oref spec drivers)))
+        ;; The below check for function may be useful elsewhere too
+        (car
+         (cond
+          ;; We can call `accumulator' directly, sparing a `funcall'
+          ((and (consp accumulator) (eql (car accumulator) 'function))
+           (oset driver actions
+                 `((setq ,location
+                         (,(cadr accumulator)
+                          ,location
+                          ,(i--expand-in-environment form))))))
+          ;; just like above, but this is a different form to spell
+          ;; the same thing
+          ((and (symbolp accumulator) (fboundp accumulator))
+           (oset driver actions
+                 `((setq ,location
+                         (,accumulator
+                          ,location
+                          ,(i--expand-in-environment form))))))
+          (t (oset driver actions
+                   `((setq ,location
+                           (funcall
+                            ,accumulator
+                            ,location
+                            ,(i--expand-in-environment form))))))))))))
 
 (defun i--parse-hash (exp &optional spec)
   "Parses the (hash key &optional value into into table) expression.

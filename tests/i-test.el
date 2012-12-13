@@ -564,4 +564,19 @@ with (skip) keyword of `i-iterate' macro."
          (message "2 printing i: %s" i)
          (incf i))))))
 
+(ert-deftest i-test-for-across-accumulate ()
+  "Tests the expansion of (for * across **) in combination
+with (accumulate * ** into ***) keyword of `i-iterate' macro."
+  (expansion-equals
+   (++ (for i across [1 2 3 4 5 6])
+     (accumulate (list i (* 2 i)) #'append into result)
+     (message "result so far: %s" result))
+   (let* (result (--0 [1 2 3 4 5 6]) (--1 0) i)
+     (while (< --1 (length --0))
+       (setq i (aref --0 --1))
+       (incf --1)
+       (setq result (append result (list i (* 2 i))))
+       (message "result so far: %s" result))
+     result)))
+
 ;;; i-test.el ends here.
