@@ -575,8 +575,33 @@ with (accumulate * ** into ***) keyword of `i-iterate' macro."
      (while (< --1 (length --0))
        (setq i (aref --0 --1))
        (incf --1)
-       (setq result (append result (list i (* 2 i))))
+       (setq result
+             (if result
+                 (append result (list i (* 2 i)))
+               (list i (* 2 i))))
        (message "result so far: %s" result))
      result)))
+
+(ert-deftest i-test-for-across-su-multiply-minimize-maximize-finally ()
+  "Tests the expansion of (for * across **) in combination
+with (sum * into ***), (multiply * into ***), (minimize * into ***)
+and (maximize * into ***) keywords of `i-iterate' macro."
+  (expansion-equals
+   (++ (for i across [1 2 3 4 5])
+     (sum i into a)
+     (multiply i into b)
+     (minimize i into c)
+     (maximize i into d)
+     (finally (return (list a b c d))))
+   (let* (d c b a (--0 [1 2 3 4 5]) (--1 0) i)
+     (catch (quote --2)
+       (while (< --1 (length --0))
+         (setq i (aref --0 --1))
+         (incf --1)
+         (setq a (if a (+ a i) i))
+         (setq b (if b (* b i) i))
+         (setq c (if c (min c i) i))
+         (setq d (if d (max d i) i)))
+       (throw (quote --2) (list a b c d)) d))))
 
 ;;; i-test.el ends here.

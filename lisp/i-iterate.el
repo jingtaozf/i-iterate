@@ -307,7 +307,12 @@ Use `i-add-for-handler' if you need to add your own driver")
                       (output . i--parse-output)
                       (return . i--parse-return)
                       (skip . i--parse-skip)
-                      (accumulate . i--parse-accumulate))
+                      (accumulate . i--parse-accumulate)
+                      (sum . i--parse-sum)
+                      (multiply . i--parse-multiply)
+                      (count . i--parse-count)
+                      (minimize . i--parse-minimize)
+                      (maximize . i--parse-maximize))
   "The expanders used in the nested forms in the `i-iterate' macro")
 
 (defvar i-prefix-handlers '((repeat . i--parse-repeat)
@@ -317,7 +322,12 @@ Use `i-add-for-handler' if you need to add your own driver")
                             (output . i--parse-output)
                             (with . i--parse-with)
                             (finally . i--parse-finally)
-                            (accumulate . i--parse-accumulate))
+                            (accumulate . i--parse-accumulate)
+                            (sum . i--parse-sum)
+                            (multiply . i--parse-multiply)
+                            (count . i--parse-count)
+                            (minimize . i--parse-minimize)
+                            (maximize . i--parse-maximize))
   "Top-level handlers used in expansion of `i-iterate' macro")
 
 (defvar i-spec-stack nil
@@ -1181,29 +1191,41 @@ generated with the same name."
         (oset spec result (list location))
         (oset spec drivers (cons driver (oref spec drivers)))
         ;; The below check for function may be useful elsewhere too
-        (car
-         (cond
-          ;; We can call `accumulator' directly, sparing a `funcall'
-          ((and (consp accumulator) (eql (car accumulator) 'function))
-           (oset driver actions
-                 `((setq ,location
-                         (,(cadr accumulator)
-                          ,location
-                          ,(i--expand-in-environment form))))))
-          ;; just like above, but this is a different form to spell
-          ;; the same thing
-          ((and (symbolp accumulator) (fboundp accumulator))
-           (oset driver actions
-                 `((setq ,location
-                         (,accumulator
-                          ,location
-                          ,(i--expand-in-environment form))))))
-          (t (oset driver actions
+        (let ((expanded (i--expand-in-environment form)))
+          (car
+           (cond
+            ;; We can call `accumulator' directly, sparing a `funcall'
+            ((and (consp accumulator) (eql (car accumulator) 'function))
+             (oset driver actions
                    `((setq ,location
-                           (funcall
-                            ,accumulator
-                            ,location
-                            ,(i--expand-in-environment form))))))))))))
+                           (if ,location
+                               (,(cadr accumulator) ,location ,expanded)
+                             ,expanded)))))
+            ;; just like above, but this is a different form to spell
+            ;; the same thing
+            ((and (symbolp accumulator) (fboundp accumulator))
+             (oset driver actions
+                   `((setq ,location
+                           (if ,location
+                               (,accumulator ,location ,expanded)
+                             ,expanded)))))
+            (t (oset driver actions
+                     `((setq ,location
+                             (if ,location
+                                 (funcall ,accumulator ,location ,expanded)
+                               ,expanded))))))))))))
+
+(defun i--parse-sum (exp &optional spec)
+  (i--parse-accumulate (cons (car exp) (cons #'+ (cdr exp)))))
+
+(defun i--parse-multiply (exp &optional spec)
+  (i--parse-accumulate (cons (car exp) (cons #'* (cdr exp)))))
+
+(defun i--parse-maximize (exp &optional spec)
+  (i--parse-accumulate (cons (car exp) (cons #'max (cdr exp)))))
+
+(defun i--parse-minimize (exp &optional spec)
+  (i--parse-accumulate (cons (car exp) (cons #'min (cdr exp)))))
 
 (defun i--parse-hash (exp &optional spec)
   "Parses the (hash key &optional value into into table) expression.
@@ -1236,8 +1258,13 @@ after the loop terminates normally."
   (let (result-exp
         (spec (or spec  i-spec-stack))
         ;; This looks wrong, we've lost something underway
-        (exp (if (consp exp) exp (list exp))))
-    (setq result-exp (i--expand-in-environment exp spec))
+        (exp (if (consp exp) exp (list exp)))
+        iter)
+    (setq iter exp)
+    (while iter
+      (setq result-exp
+            (cons (i--expand-in-environment (car iter)) result-exp)
+            iter (cdr iter)))
     (oset spec result (append result-exp (oref spec result)))
     result-exp))
 
@@ -1374,13 +1401,13 @@ described in `i-expanders'"
 (defun i--parse-exp (exp spec)
   "Dispatches on the prefix of EXP, finds a proper handler in
 `i-prefix-handlers' and invokes it with the rest of the EXP"
-  (let ((handler (cdr (assoc (car exp) i-prefix-handlers))))
+  (let ((handler (cdr (assoc (car exp) i-prefix-handlers)))
+        (i-spec-stack spec))
     (if handler
         (funcall handler
                  (i--expand-in-environment (cdr exp)) spec)
       (with-slots (body) spec
-         (let ((i-spec-stack spec))
-           (push (i--expand-in-environment exp) body))))))
+        (push (i--expand-in-environment exp) body)))))
 
 (defun i--parse-specs (specs)
   "Parses SPECS and creates an AST represented in an instance of
@@ -1520,7 +1547,9 @@ a continue condition."
                  (t t)))
                (vars (nreverse variables))
                (break-form
-                (when (oref spec break-condition)
+                ;; TODO: This needs to be rewritten. I don't understand why
+                ;; does result depend on `break-condition'
+                (when (oref spec break-condition-triggers)
                   `(when (or ,@(oref spec break-condition-triggers))
                      (throw ',(oref spec break-condition) --i-result-form))))
                (mandatory-block
