@@ -37,7 +37,7 @@ prepare:
 	mkdir -p ${HTMLDOCDST}
 
 move-html:
-	$(shell [[ -e `find ./ -maxdepth 1 -name "*.html"` ]] || \
+	$(shell [[ '0' -ne `find ./ -maxdepth 1 -name "*.html" | wc -l` ]] && \
 mv -f *.html ${HTMLDOCDST}/)
 
 rename-wiki:

@@ -665,8 +665,8 @@ additional variable)"
                        (cond
                         ((and key-var value-var)
                          `(setq ,key-var k ,value-var v))
-                        (key-var ,(setq key-var 'k))
-                        (value-var ,(setq value-var 'v))))
+                        (key-var `(setq ,key-var 'k))
+                        (value-var `(setq ,value-var 'v))))
                     --i-actions-form
                     --i-body-form --i-epilogue-form)))
           (when how
@@ -1215,6 +1215,8 @@ generated with the same name."
                                  (funcall ,accumulator ,location ,expanded)
                                ,expanded))))))))))))
 
+;; TODO: support the direction of accumulation, remake `collect' by using
+;; accumulate.
 (defun i--parse-sum (exp &optional spec)
   (i--parse-accumulate (cons (car exp) (cons #'+ (cdr exp)))))
 
@@ -1226,6 +1228,18 @@ generated with the same name."
 
 (defun i--parse-minimize (exp &optional spec)
   (i--parse-accumulate (cons (car exp) (cons #'min (cdr exp)))))
+
+(defun i--parse-count (exp &optional spec)
+  (let ((spec (or spec i-spec-stack))
+        (driver (make-instance 'i-driver))
+        (iterator (mapcar #'i--expand-in-environment exp)) var)
+    (while iterator
+      (setq var (car iterator) iterator (cdr iterator))
+      (unless (i-has-variable-p spec var)
+        (oset driver variables (cons var (oref driver variables))))
+      (oset driver actions `((incf ,var) ,@(oref driver actions))))
+    (oset spec drivers (cons driver (oref spec drivers)))
+    (append '(progn) (oref driver actions))))
 
 (defun i--parse-hash (exp &optional spec)
   "Parses the (hash key &optional value into into table) expression.

@@ -604,4 +604,23 @@ and (maximize * into ***) keywords of `i-iterate' macro."
          (setq d (if d (max d i) i)))
        (throw (quote --2) (list a b c d)) d))))
 
+(ert-deftest i-test-with-for-count-finally-return ()
+  "Tests the expansion of (for * from ** to ***) in combination
+with (count *), (finally *) and (return *) keywords of `i-iterate' macro."
+  (expansion-equals
+   (++ (with ((i 1)))
+     (for j from 0 to 10)
+     (count i j)
+     (message "i: %s, j: %s" i j)
+     (finally (return (list i j))))
+   (let* ((j 0) (i 1))
+     (catch (quote --0)
+       (while (<= j 10)
+         (incf j)
+         (incf i)
+         (message "i: %s, j: %s" i j)
+         (incf j))
+       (throw (quote --0)
+              (list i j))))))
+
 ;;; i-test.el ends here.
