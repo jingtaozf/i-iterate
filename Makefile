@@ -5,10 +5,10 @@
 # for generating GoogleWiki pages (unfortunately, it doesn't capitalize
 # the names of the pages).
 
-PACKAGE = i-iterate
-DOCDST = ${PACKAGE}/docs
-HTMLDOCDST = ${PACKAGE}/html-docs
-DOCSRC = ${PACKAGE}/info
+PACKAGE = ./i-iterate
+DOCDST = ./docs
+HTMLDOCDST = ./html-docs
+DOCSRC = ./info
 IC = makeinfo
 ICO = --force
 TEXI2HTML = texi2html
@@ -18,31 +18,36 @@ HTML2WIKIO = --dialect GoogleCode
 TEXI = $(wildcard $(DOCSRC)/*.texi)
 INFO = $(addprefix $(DOCDST)/,$(notdir $(TEXI:.texi=.info)))
 WIKIDST = ../wiki
-HTML = $(wildcard $(HTMLDOCDST)/*.html)
-WIKI = $(addprefix $(WIKIDST)/,$(notdir $(HTML:.html=.wiki)))
 
 $(DOCDST)/%.info: $(DOCSRC)/%.texi
 	$(IC) $(ICO) -o $@ $<
 	$(TEXI2HTML) $(TEXI2HTMLO) $<
 
+# This rule is not applied! :(
 $(WIKIDST)/%.wiki: $(HTMLDOCDST)/%.html
 	$(HTML2WIKI) $(HTML2WIKIO) $< > $@
 
-default: prepare $(INFO) move-html $(WIKI) rename-wiki byte-compile
-	cp -r lisp info Makefile README i-pkg.el ${PACKAGE}
+default: prepare $(INFO) move-html rename-wiki byte-compile
+	cp -r lisp info Makefile README i-pkg.el $(PACKAGE)
 
 prepare:
-	mkdir -p ${PACKAGE}
-	mkdir -p ${DOCDST}
-	mkdir -p ${HTMLDOCDST}
+	mkdir -p $(PACKAGE)
+	mkdir -p $(DOCDST)
+	mkdir -p $(HTMLDOCDST)
 
 move-html:
 	$(shell [[ '0' -ne `find ./ -maxdepth 1 -name "*.html" | wc -l` ]] && \
-mv -f *.html ${HTMLDOCDST}/)
+mv -f *.html $(HTMLDOCDST)/)
+	$(foreach html, $(wildcard $(HTMLDOCDST)/*.html), \
+$(HTML2WIKI) $(HTML2WIKIO) $(html) > \
+$(addprefix $(WIKIDST)/, $(notdir $(html:.html=.wiki))))
+
+%::
+	@echo "These files fall through: $<"
 
 rename-wiki:
-	$(shell cd ${WIKIDST} && rename 'i-iterate' 'Iterate' *.wiki)
-	$(shell find ${WIKIDST} -name "*.wiki" -exec sed -i \
+	$(shell cd $(WIKIDST) && rename 'i-iterate' 'Iterate' *.wiki)
+	$(shell find $(WIKIDST) -name "*.wiki" -exec sed -i \
 's/\[i-iterate/\[Iterate/g;s/\.html\#/\#/g;s/&lt;/\</g;s/&gt;/\>/g' \
 '{}' \;)
 
@@ -53,6 +58,7 @@ clean:
 	rm -f ./lisp/*.elc
 	rm -f ./*.html
 	rm -rf ${DOCDST}
+	rm -rf ${HTMLDOCDST}
 	rm -rf ${PACKAGE}
 
 # We don't have an install script yet

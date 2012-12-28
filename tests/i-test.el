@@ -623,4 +623,22 @@ with (count *), (finally *) and (return *) keywords of `i-iterate' macro."
        (throw (quote --0)
               (list i j))))))
 
+(ert-deftest i-test-for-binary ()
+  "Tests the expansion of (for * binary ** *** ****) of `i-iterate' macro."
+  (expansion-equals
+   (++ (for i binary [1 2 3 4 5 6 7 8 9]
+            (= i 4) (< i 4))
+     (message "i: %s" i))
+   (let* ((--4 [1 2 3 4 5 6 7 8 9])
+          (--5 1) (--2 (1- (length --4)))
+          (--1 (length --4)) (--0 0))
+     (while (and (/= --5 0) (> --1 0))
+       (let ((--3 (ceiling --1 2)))
+         (setq --1 --3
+               --0 (min (+ --0 (* --3 --5)) --2)
+               i (aref --4 --0)
+               --5 (cond ((= i 4) 0) ((< i 4) 1) (t -1))))
+       (message "i: %s" i))
+     (if (= 0 --5) --0 -1))))
+
 ;;; i-test.el ends here.

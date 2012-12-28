@@ -432,6 +432,36 @@ additional variable)"
                   --i-body-form
                   (setq ,node (cdr ,node)))))))))
 
+(i-add-for-handler binary (spec driver exp)
+  (destructuring-bind
+      (searched verb source-array equal-exp less-exp)
+      exp
+    (setq equal-exp (i--expand-in-environment equal-exp)
+          less-exp (i--expand-in-environment less-exp)
+          source-array (i--expand-in-environment source-array))
+    (let ((offset (i-gensym spec))
+          (step-size (i-gensym spec))
+          (minlen (i-gensym spec))
+          (half (i-gensym spec))
+          (array (i-gensym spec))
+          (found (i-gensym spec)))
+      (oset driver variables
+            `((,offset 0) (,step-size (length ,array))
+              (,minlen (1- (length ,array)))
+              (,found 1) (,array ,source-array)))
+      (oset driver exit-conditions
+            `((and (/= ,found 0) (> ,step-size 0))))
+      (oset driver actions
+            `((let ((,half (ceiling ,step-size 2)))
+               (setq ,step-size ,half
+                     ,offset (min (+ ,offset (* ,half ,found)) ,minlen)
+                     ,searched (aref ,array ,offset)
+                     ,found (cond
+                             (,equal-exp 0)
+                             (,less-exp 1)
+                             (t -1))))))
+      (oset spec result `((if (= 0 ,found) ,offset -1))))))
+
 (i-add-for-handler breadth-first (spec driver exp)
   (destructuring-bind (var verb tree) exp
     (let ((roots (i-gensym spec))
