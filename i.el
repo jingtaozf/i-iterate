@@ -108,7 +108,7 @@
 
 ;;; Code:
 
-(require 'cl)
+(require 'cl-lib)
 (require 'eieio)
 
 (defmacro i-deferror (name message &optional aliases docstring)
@@ -1683,7 +1683,7 @@ a continue condition."
                   (append '(progn) epilogue)))))))))
 (defalias '++ 'i-iterate)
 
-(provide 'i-iterate)
+(provide 'i)
 
 ;; Local Variables:
 ;; byte-compile-warnings: (not cl-functions)
